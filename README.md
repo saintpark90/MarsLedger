@@ -1,0 +1,81 @@
+# Mars Ledger 가계부
+
+카드·은행 알림을 휴대폰에서 모아 Supabase에 저장하고, 웹앱에서 잔액 예상과 소비 패턴을 보는 가정용 가계부입니다.
+
+## 구성
+
+- `android/` 알림 수집 앱. 설치 파일은 `MarsLedger-collector.apk`
+- `web/` 설치 가능한 웹앱. Vercel과 GitHub Pages로 배포할 수 있습니다.
+- `supabase/migrations/20261005000000_init.sql` 데이터베이스 스키마
+- `shared/categories.json` 사용처 자동 분류 단어. 피자헛은 식비로 들어갑니다.
+
+금융 알림만 읽습니다. 금액과 승인, 출금, 입금, 결제, 이체, 취소가 함께 있는 알림만 서버로 보냅니다.
+
+## 1. Supabase
+
+1. [Supabase](https://supabase.com)에서 프로젝트를 만듭니다.
+2. SQL Editor에서 `supabase/migrations/20261005000000_init.sql` 전체를 실행합니다.
+3. Authentication → Providers → Email에서 가입을 켭니다. 휴대폰에서 바로 쓰려면 Confirm email을 끄는 편이 편합니다.
+4. Project Settings → API에서 Project URL과 `anon` `public` 키를 복사합니다.
+
+가입이 끝나면 기본 카테고리와 분류 단어가 계정에 만들어집니다.
+
+## 2. 웹앱
+
+```bash
+npm install --prefix web
+npm --prefix web run dev
+```
+
+주소는 `http://localhost:5173` 입니다. Supabase를 아직 넣지 않으면 이 브라우저에만 저장되는 데모로 열리고, 예시 데이터로 예상 잔액과 그래프를 볼 수 있습니다.
+
+연결 방법은 두 가지입니다.
+
+- 설정 화면에 Project URL과 anon 키를 붙여 넣습니다.
+- 또는 `web/.env.example`을 `web/.env.local`로 복사해 값을 채운 뒤 다시 빌드합니다.
+
+웹에서 가입한 이메일과 비밀번호를 휴대폰 앱에도 입력합니다.
+
+### Vercel
+
+저장소를 연결하고 루트의 `vercel.json`을 사용하면 됩니다. 환경 변수는 `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`입니다. 변수를 비워 두고 배포한 뒤, 사이트 설정 화면에서 키를 붙여 넣어도 됩니다.
+
+### GitHub Pages
+
+`main`에 푸시하면 `.github/workflows/pages.yml`이 `web/dist`를 Pages로 배포합니다. 저장소 Settings → Pages에서 Source를 GitHub Actions로 바꿉니다.
+
+프로젝트 페이지 주소는 `https://사용자.github.io/저장소이름/` 입니다. 워크플로는 이 경로에 맞춰 빌드합니다. 같은 이름의 Secrets를 넣으면 빌드에 Supabase 주소가 포함됩니다.
+
+## 3. 휴대폰 앱
+
+`MarsLedger-collector.apk`를 폰으로 옮겨 설치합니다. 설치가 막히면 브라우저에서 알 수 없는 앱 설치를 허용합니다.
+
+1. Supabase URL과 anon 키를 입력합니다.
+2. 웹에서 만든 계정으로 로그인합니다. 앱에서 가입할 수도 있습니다.
+3. 알림 접근을 허용합니다.
+4. 배터리 최적화 예외를 허용하면 알림을 놓칠 가능성이 줄어듭니다.
+5. 카드나 은행 알림이 오면 자동으로 장부에 쌓입니다. 시험 문구로 먼저 확인해 볼 수 있습니다.
+
+웹앱은 화면이 다시 보이거나 30초마다 새 내역을 가져옵니다.
+
+## 예상 잔액
+
+설정에서 메인 통장 잔액과 급여일을 저장합니다.
+
+- 오늘을 포함해 아직 지나지 않은 자동이체는 빠질 돈으로 계산합니다.
+- 카드 청구액은 지난달 신용 결제 합계입니다. 카드 화면에서 금액을 직접 넣을 수 있습니다. 결제일이 지나기 전이면 빼고, 지난 뒤에는 이미 빠진 것으로 봅니다.
+- 현재 신용카드 사용액은 이번 달 승인분이며, 다음 청구의 기준입니다.
+- 급여일이 되기 전이거나 이번 달 급여를 미입금으로 두면 급여를 더합니다. 이번 달 금액이 없으면 지난달 급여를 사용합니다.
+
+자동이체와 카드는 각각 “이미 나감”, “아직 안 나감”, “날짜 기준”으로 바꿀 수 있습니다.
+
+## 웹앱 설치
+
+Chrome에서는 상단의 앱 설치 또는 브라우저 메뉴의 홈 화면에 추가를 사용합니다. 아이폰 Safari에서는 공유 → 홈 화면에 추가를 사용합니다.
+
+## 개발 확인
+
+```bash
+npm --prefix web test
+npm --prefix web run build
+```

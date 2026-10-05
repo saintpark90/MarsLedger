@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ink">#1C1915</color>
+    <color name="paper">#EFEAE1</color>
+    <color name="sheet">#FBF8F2</color>
+    <color name="pine">#1E6A45</color>
+    <color name="spine">#8E2F2A</color>
+    <color name="icon_bg">#1C1915</color>
+</resources>

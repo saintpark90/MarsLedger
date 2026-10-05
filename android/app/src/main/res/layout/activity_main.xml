@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:letterSpacing="0.18"
+            android:text="MARS LEDGER"
+            android:textAllCaps="true"
+            android:textColor="#6F685E"
+            android:textSize="12sp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="알림 수집"
+            android:textColor="#1C1915"
+            android:textSize="28sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="카드·은행 알림만 읽어 내가 연결한 Supabase로 보냅니다. 다른 앱 알림은 전송하지 않습니다."
+            android:textColor="#6F685E"
+            android:textSize="14sp" />
+
+        <TextView
+            android:id="@+id/statusView"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:background="#FBF8F2"
+            android:padding="14dp"
+            android:textColor="#1C1915"
+            android:textSize="14sp" />
+
+        <EditText
+            android:id="@+id/urlInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:hint="https://프로젝트.supabase.co"
+            android:inputType="textUri"
+            android:importantForAutofill="no" />
+
+        <EditText
+            android:id="@+id/keyInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="anon public 키"
+            android:inputType="textPassword"
+            android:importantForAutofill="no" />
+
+        <EditText
+            android:id="@+id/emailInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="이메일"
+            android:inputType="textEmailAddress" />
+
+        <EditText
+            android:id="@+id/passwordInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="비밀번호"
+            android:inputType="textPassword" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/loginButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="로그인" />
+
+            <Button
+                android:id="@+id/signUpButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:text="가입" />
+        </LinearLayout>
+
+        <Button
+            android:id="@+id/logoutButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="로그아웃" />
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/enabledSwitch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="금융 알림 수집" />
+
+        <Button
+            android:id="@+id/listenerButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="알림 접근 허용" />
+
+        <Button
+            android:id="@+id/batteryButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="배터리 최적화 예외" />
+
+        <Button
+            android:id="@+id/flushButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="대기 항목 다시 보내기" />
+
+        <EditText
+            android:id="@+id/sampleInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:hint="시험 알림 문구"
+            android:inputType="textMultiLine"
+            android:minLines="2" />
+
+        <Button
+            android:id="@+id/sampleButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="이 문구 전송" />
+
+        <TextView
+            android:id="@+id/logView"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:textColor="#1C1915"
+            android:textSize="13sp" />
+    </LinearLayout>
+</ScrollView>

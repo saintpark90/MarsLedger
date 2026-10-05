@@ -1,0 +1,473 @@
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { explainError, readConnection } from "./connection";
+import { buildDefaultCatalog } from "./defaults";
+import type {
+  CardMark,
+  Category,
+  CreditCard,
+  LedgerSnapshot,
+  Recurring,
+  RecurringMark,
+  Rule,
+  Salary,
+  Settings,
+  Transaction,
+} from "./types";
+
+const LOCAL_KEY = "marsledger.ledger.v1";
+
+type Row = Record<string, unknown>;
+
+let clientCache: { key: string; client: SupabaseClient } | null = null;
+
+export function supabaseClient(config = readConnection()): SupabaseClient | null {
+  if (!config) return null;
+  const key = `${config.url}:${config.anonKey}`;
+  if (clientCache?.key === key) return clientCache.client;
+  const client = createClient(config.url, config.anonKey, {
+    auth: { persistSession: true, storageKey: "marsledger-auth", autoRefreshToken: true },
+  });
+  clientCache = { key, client };
+  return client;
+}
+
+export function emptySnapshot(): LedgerSnapshot {
+  const { categories, rules } = buildDefaultCatalog();
+  return {
+    settings: { mainBalance: 0, balanceAsOf: null, payday: 25, syncBalance: true },
+    categories,
+    rules,
+    transactions: [],
+    cards: [],
+    recurring: [],
+    salaries: [],
+    recurringMarks: [],
+    cardMarks: [],
+  };
+}
+
+export function loadLocal(): LedgerSnapshot {
+  try {
+    const raw = localStorage.getItem(LOCAL_KEY);
+    if (!raw) return persistLocal(emptySnapshot());
+    const parsed = JSON.parse(raw) as { version?: number; snap?: LedgerSnapshot };
+    if (parsed.version !== 1 || !parsed.snap) return persistLocal(emptySnapshot());
+    return parsed.snap;
+  } catch {
+    return persistLocal(emptySnapshot());
+  }
+}
+
+export function persistLocal(snap: LedgerSnapshot): LedgerSnapshot {
+  localStorage.setItem(LOCAL_KEY, JSON.stringify({ version: 1, snap }));
+  return snap;
+}
+
+export async function signIn(email: string, password: string): Promise<void> {
+  const client = requiredClient();
+  const { error } = await client.auth.signInWithPassword({ email, password });
+  if (error) throw new Error(explainError(error));
+}
+
+export async function signUp(email: string, password: string): Promise<"session" | "confirm"> {
+  const client = requiredClient();
+  const { data, error } = await client.auth.signUp({ email, password });
+  if (error) throw new Error(explainError(error));
+  return data.session ? "session" : "confirm";
+}
+
+export async function signOut(): Promise<void> {
+  const client = supabaseClient();
+  if (!client) return;
+  await client.auth.signOut();
+}
+
+export async function currentEmail(): Promise<string | null> {
+  const client = supabaseClient();
+  if (!client) return null;
+  const { data } = await client.auth.getSession();
+  return data.session?.user.email ?? null;
+}
+
+export async function loadRemote(): Promise<LedgerSnapshot> {
+  const client = requiredClient();
+  const userId = await userIdOf(client);
+  const [settingsRes, categoriesRes, rulesRes, txRes, cardsRes, recurringRes, salaryRes, recurringMarksRes, cardMarksRes] =
+    await Promise.all([
+      client.from("user_settings").select("*").eq("user_id", userId).maybeSingle(),
+      client.from("categories").select("*").eq("user_id", userId).order("sort_order"),
+      client.from("category_rules").select("*").eq("user_id", userId),
+      client.from("transactions").select("*").eq("user_id", userId).order("occurred_at", { ascending: false }).limit(5000),
+      client.from("credit_cards").select("*").eq("user_id", userId).order("created_at"),
+      client.from("recurring_transfers").select("*").eq("user_id", userId).order("day_of_month"),
+      client.from("salary_entries").select("*").eq("user_id", userId),
+      client.from("recurring_marks").select("*").eq("user_id", userId),
+      client.from("card_marks").select("*").eq("user_id", userId),
+    ]);
+  for (const result of [settingsRes, categoriesRes, rulesRes, txRes, cardsRes, recurringRes, salaryRes, recurringMarksRes, cardMarksRes]) {
+    if (result.error) throw new Error(explainError(result.error));
+  }
+
+  let categories = ((categoriesRes.data ?? []) as Row[]).map(mapCategory);
+  let rules = ((rulesRes.data ?? []) as Row[]).map(mapRule);
+  if (categories.length === 0) {
+    const seeded = await seedDefaults(client, userId);
+    categories = seeded.categories;
+    rules = seeded.rules;
+  }
+
+  const settingsRow = settingsRes.data as Row | null;
+  return {
+    settings: settingsRow
+      ? {
+          mainBalance: Number(settingsRow.main_balance ?? 0),
+          balanceAsOf: (settingsRow.balance_as_of as string | null) ?? null,
+          payday: Number(settingsRow.payday ?? 25),
+          syncBalance: Boolean(settingsRow.sync_balance ?? true),
+        }
+      : { mainBalance: 0, balanceAsOf: null, payday: 25, syncBalance: true },
+    categories,
+    rules,
+    transactions: ((txRes.data ?? []) as Row[]).map(mapTransaction),
+    cards: ((cardsRes.data ?? []) as Row[]).map(mapCard),
+    recurring: ((recurringRes.data ?? []) as Row[]).map(mapRecurring),
+    salaries: ((salaryRes.data ?? []) as Row[]).map(mapSalary),
+    recurringMarks: ((recurringMarksRes.data ?? []) as Row[]).map(mapRecurringMark),
+    cardMarks: ((cardMarksRes.data ?? []) as Row[]).map(mapCardMark),
+  };
+}
+
+export async function saveSettings(settings: Settings): Promise<void> {
+  const client = requiredClient();
+  const userId = await userIdOf(client);
+  const { error } = await client.from("user_settings").upsert({
+    user_id: userId,
+    main_balance: settings.mainBalance,
+    balance_as_of: settings.balanceAsOf,
+    payday: settings.payday,
+    sync_balance: settings.syncBalance,
+  });
+  if (error) throw new Error(explainError(error));
+}
+
+export async function saveTransaction(transaction: Transaction): Promise<void> {
+  await saveTransactions([transaction]);
+}
+
+export async function saveTransactions(transactions: Transaction[]): Promise<void> {
+  if (transactions.length === 0) return;
+  const client = requiredClient();
+  const userId = await userIdOf(client);
+  const { error } = await client.from("transactions").upsert(transactions.map((transaction) => toTransactionRow(transaction, userId)));
+  if (error) throw new Error(explainError(error));
+}
+
+export async function deleteTransaction(id: string): Promise<void> {
+  const client = requiredClient();
+  const { error } = await client.from("transactions").delete().eq("id", id);
+  if (error) throw new Error(explainError(error));
+}
+
+export async function saveCategory(category: Category): Promise<void> {
+  const client = requiredClient();
+  const userId = await userIdOf(client);
+  const { error } = await client.from("categories").upsert({
+    id: category.id,
+    user_id: userId,
+    name: category.name,
+    kind: category.kind,
+    color: category.color,
+    sort_order: category.sort,
+  });
+  if (error) throw new Error(explainError(error));
+}
+
+export async function deleteCategory(id: string): Promise<void> {
+  const client = requiredClient();
+  const { error } = await client.from("categories").delete().eq("id", id);
+  if (error) throw new Error(explainError(error));
+}
+
+export async function saveRule(rule: Rule): Promise<void> {
+  const client = requiredClient();
+  const userId = await userIdOf(client);
+  const { error } = await client.from("category_rules").upsert({
+    id: rule.id,
+    user_id: userId,
+    category_id: rule.categoryId,
+    keyword: rule.keyword,
+  });
+  if (error) throw new Error(explainError(error));
+}
+
+export async function deleteRule(id: string): Promise<void> {
+  const client = requiredClient();
+  const { error } = await client.from("category_rules").delete().eq("id", id);
+  if (error) throw new Error(explainError(error));
+}
+
+export async function saveRecurring(item: Recurring): Promise<void> {
+  const client = requiredClient();
+  const userId = await userIdOf(client);
+  const { error } = await client.from("recurring_transfers").upsert({
+    id: item.id,
+    user_id: userId,
+    name: item.name,
+    amount: item.amount,
+    day_of_month: item.dayOfMonth,
+    category_id: item.categoryId,
+    enabled: item.enabled,
+  });
+  if (error) throw new Error(explainError(error));
+}
+
+export async function deleteRecurring(id: string): Promise<void> {
+  const client = requiredClient();
+  const { error } = await client.from("recurring_transfers").delete().eq("id", id);
+  if (error) throw new Error(explainError(error));
+}
+
+export async function saveRecurringMark(mark: RecurringMark): Promise<void> {
+  const client = requiredClient();
+  const userId = await userIdOf(client);
+  const { error } = await client.from("recurring_marks").upsert({
+    user_id: userId,
+    recurring_id: mark.recurringId,
+    year: mark.year,
+    month: mark.month,
+    settled: mark.settled,
+  });
+  if (error) throw new Error(explainError(error));
+}
+
+export async function deleteRecurringMark(recurringId: string, year: number, month: number): Promise<void> {
+  const client = requiredClient();
+  const { error } = await client
+    .from("recurring_marks")
+    .delete()
+    .eq("recurring_id", recurringId)
+    .eq("year", year)
+    .eq("month", month);
+  if (error) throw new Error(explainError(error));
+}
+
+export async function saveCard(card: CreditCard): Promise<void> {
+  const client = requiredClient();
+  const userId = await userIdOf(client);
+  const { error } = await client.from("credit_cards").upsert({
+    id: card.id,
+    user_id: userId,
+    name: card.name,
+    payment_day: card.paymentDay,
+    color: card.color,
+  });
+  if (error) throw new Error(explainError(error));
+}
+
+export async function deleteCard(id: string): Promise<void> {
+  const client = requiredClient();
+  const { error } = await client.from("credit_cards").delete().eq("id", id);
+  if (error) throw new Error(explainError(error));
+}
+
+export async function saveCardMark(mark: CardMark): Promise<void> {
+  const client = requiredClient();
+  const userId = await userIdOf(client);
+  if (mark.amount == null && mark.paid == null) {
+    const { error } = await client.from("card_marks").delete().eq("card_id", mark.cardId).eq("year", mark.year).eq("month", mark.month);
+    if (error) throw new Error(explainError(error));
+    return;
+  }
+  const { error } = await client.from("card_marks").upsert({
+    user_id: userId,
+    card_id: mark.cardId,
+    year: mark.year,
+    month: mark.month,
+    amount: mark.amount,
+    paid: mark.paid,
+  });
+  if (error) throw new Error(explainError(error));
+}
+
+export async function deleteSalary(year: number, month: number): Promise<void> {
+  const client = requiredClient();
+  const userId = await userIdOf(client);
+  const { error } = await client.from("salary_entries").delete().eq("user_id", userId).eq("year", year).eq("month", month);
+  if (error) throw new Error(explainError(error));
+}
+
+export async function saveSalary(salary: Salary): Promise<void> {
+  const client = requiredClient();
+  const userId = await userIdOf(client);
+  const { error } = await client.from("salary_entries").upsert(
+    {
+      id: salary.id,
+      user_id: userId,
+      year: salary.year,
+      month: salary.month,
+      amount: salary.amount,
+      received: salary.received,
+    },
+    { onConflict: "user_id,year,month" },
+  );
+  if (error) throw new Error(explainError(error));
+}
+
+function requiredClient(): SupabaseClient {
+  const client = supabaseClient();
+  if (!client) throw new Error("Supabase가 연결되지 않았습니다.");
+  return client;
+}
+
+async function userIdOf(client: SupabaseClient): Promise<string> {
+  const { data, error } = await client.auth.getUser();
+  if (error || !data.user) throw new Error("로그인이 필요합니다.");
+  return data.user.id;
+}
+
+async function seedDefaults(client: SupabaseClient, userId: string): Promise<{ categories: Category[]; rules: Rule[] }> {
+  const seeded = buildDefaultCatalog();
+  const { error: categoryError } = await client.from("categories").insert(
+    seeded.categories.map((category) => ({
+      id: category.id,
+      user_id: userId,
+      name: category.name,
+      kind: category.kind,
+      color: category.color,
+      sort_order: category.sort,
+    })),
+  );
+  if (categoryError) throw new Error(explainError(categoryError));
+  const { error: ruleError } = await client.from("category_rules").insert(
+    seeded.rules.map((rule) => ({
+      id: rule.id,
+      user_id: userId,
+      category_id: rule.categoryId,
+      keyword: rule.keyword,
+    })),
+  );
+  if (ruleError) throw new Error(explainError(ruleError));
+  const { error: settingsError } = await client.from("user_settings").upsert({ user_id: userId });
+  if (settingsError) throw new Error(explainError(settingsError));
+  return seeded;
+}
+
+function asDirection(value: unknown): Transaction["direction"] {
+  if (value === "income" || value === "refund") return value;
+  return "expense";
+}
+
+function asMethod(value: unknown): Transaction["method"] {
+  if (value === "credit" || value === "debit" || value === "transfer") return value;
+  return "unknown";
+}
+
+function mapCategory(row: Row): Category {
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    kind: row.kind === "income" ? "income" : "expense",
+    color: String(row.color),
+    sort: Number(row.sort_order ?? 0),
+  };
+}
+
+function mapRule(row: Row): Rule {
+  return { id: String(row.id), categoryId: String(row.category_id), keyword: String(row.keyword) };
+}
+
+function mapTransaction(row: Row): Transaction {
+  return {
+    id: String(row.id),
+    amount: Number(row.amount),
+    merchant: String(row.merchant ?? ""),
+    rawText: (row.raw_text as string | null) ?? null,
+    direction: asDirection(row.direction),
+    method: asMethod(row.method),
+    instrument: (row.instrument as string | null) ?? null,
+    cardId: (row.card_id as string | null) ?? null,
+    categoryId: (row.category_id as string | null) ?? null,
+    source: row.source === "manual" ? "manual" : "notification",
+    notificationKey: (row.notification_key as string | null) ?? null,
+    balanceAfter: row.balance_after == null ? null : Number(row.balance_after),
+    occurredAt: String(row.occurred_at),
+    excluded: Boolean(row.excluded),
+    autoCategorized: row.auto_categorized !== false,
+    createdAt: String(row.created_at ?? row.occurred_at),
+  };
+}
+
+function mapCard(row: Row): CreditCard {
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    paymentDay: Number(row.payment_day),
+    color: String(row.color ?? "#1e6a45"),
+  };
+}
+
+function mapRecurring(row: Row): Recurring {
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    amount: Number(row.amount),
+    dayOfMonth: Number(row.day_of_month),
+    categoryId: (row.category_id as string | null) ?? null,
+    enabled: Boolean(row.enabled),
+  };
+}
+
+function mapSalary(row: Row): Salary {
+  return {
+    id: String(row.id),
+    year: Number(row.year),
+    month: Number(row.month),
+    amount: Number(row.amount),
+    received: Boolean(row.received),
+  };
+}
+
+function mapRecurringMark(row: Row): RecurringMark {
+  return {
+    recurringId: String(row.recurring_id),
+    year: Number(row.year),
+    month: Number(row.month),
+    settled: Boolean(row.settled),
+  };
+}
+
+function mapCardMark(row: Row): CardMark {
+  return {
+    cardId: String(row.card_id),
+    year: Number(row.year),
+    month: Number(row.month),
+    amount: row.amount == null ? null : Number(row.amount),
+    paid: row.paid == null ? null : Boolean(row.paid),
+  };
+}
+
+export function resetClientCache(): void {
+  clientCache = null;
+}
+
+function toTransactionRow(transaction: Transaction, userId: string) {
+  return {
+    id: transaction.id,
+    user_id: userId,
+    amount: transaction.amount,
+    merchant: transaction.merchant,
+    raw_text: transaction.rawText,
+    direction: transaction.direction,
+    method: transaction.method,
+    instrument: transaction.instrument,
+    card_id: transaction.cardId,
+    category_id: transaction.categoryId,
+    source: transaction.source,
+    notification_key: transaction.notificationKey,
+    balance_after: transaction.balanceAfter,
+    occurred_at: transaction.occurredAt,
+    excluded: transaction.excluded,
+    auto_categorized: transaction.autoCategorized,
+    created_at: transaction.createdAt,
+  };
+}

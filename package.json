@@ -1,0 +1,10 @@
+{
+  "name": "marsledger",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix web run dev",
+    "build": "npm --prefix web run build",
+    "test": "npm --prefix web run test",
+    "preview": "npm --prefix web run preview"
+  }
+}

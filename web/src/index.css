@@ -1,0 +1,49 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Pretendard", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  --color-paper: #efeae1;
+  --color-sheet: #fbf8f2;
+  --color-ink: #1c1915;
+  --color-muted: #6f685e;
+  --color-line: #e3dacd;
+  --color-pine: #1e6a45;
+  --color-pine-soft: #e6f3ec;
+  --color-clay: #b6402c;
+  --color-clay-soft: #f8ebe7;
+  --color-sand: #8d6a2f;
+  --color-spine: #8e2f2a;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(circle at top right, rgba(142, 47, 42, 0.08), transparent 28%),
+    var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+.sheet {
+  background: var(--color-sheet);
+  border: 1px solid var(--color-line);
+  border-radius: 18px;
+  box-shadow: 0 1px 0 rgba(28, 25, 21, 0.04);
+}
