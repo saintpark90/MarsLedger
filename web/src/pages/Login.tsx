@@ -8,6 +8,7 @@ export function LoginPage() {
   const [mode, setMode] = useState<"in" | "up">("in");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [passwordConfirm, setPasswordConfirm] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -16,6 +17,10 @@ export function LoginPage() {
     setMessage(null);
     if (!email.includes("@") || password.length < 6) {
       setMessage("이메일과 6자 이상 비밀번호를 입력해 주세요.");
+      return;
+    }
+    if (mode === "up" && password !== passwordConfirm) {
+      setMessage("비밀번호가 일치하지 않습니다.");
       return;
     }
     setBusy(true);
@@ -42,13 +47,25 @@ export function LoginPage() {
           <Field label="비밀번호">
             <TextInput type="password" autoComplete={mode === "in" ? "current-password" : "new-password"} value={password} onChange={(event) => setPassword(event.target.value)} />
           </Field>
+          {mode === "up" && (
+            <Field label="비밀번호 확인">
+              <TextInput type="password" autoComplete="new-password" value={passwordConfirm} onChange={(event) => setPasswordConfirm(event.target.value)} />
+            </Field>
+          )}
           {message && <p className="text-sm text-clay">{message}</p>}
           {ledger.notice && <p className="text-sm text-pine">{ledger.notice}</p>}
           <Button tone="ink" type="submit" disabled={busy} className="w-full">
             {mode === "in" ? "로그인" : "가입"}
           </Button>
         </form>
-        <button className="mt-4 text-sm text-pine" onClick={() => setMode(mode === "in" ? "up" : "in")}>
+        <button
+          className="mt-4 text-sm text-pine"
+          onClick={() => {
+            setMode(mode === "in" ? "up" : "in");
+            setPasswordConfirm("");
+            setMessage(null);
+          }}
+        >
           {mode === "in" ? "계정이 없으면 가입" : "이미 계정이 있으면 로그인"}
         </button>
       </div>
