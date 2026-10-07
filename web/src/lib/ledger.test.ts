@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import categories from "../../../shared/categories.json";
-import { resolveAccount, transactionBank } from "./accounts";
+import { recurringForAccount, resolveAccount, transactionBank } from "./accounts";
 import { categoryBreakdown } from "./analytics";
 import { resolveCategoryId } from "./classify";
 import { buildForecast } from "./forecast";
+import { clampDay } from "./format";
 import { parseNotification } from "./parseNotification";
 import type { BankAccount, Category, Rule, Transaction } from "./types";
 
@@ -134,6 +135,8 @@ describe("classify", () => {
     expect(categoryName("서울수학학원")).toBe("교육비");
     expect(categoryName("지하철")).toBe("교통비");
     expect(categoryName("알 수 없는 가게")).toBe("기타");
+    expect(categoryName("대출상환")).toBe("대출");
+    expect(categoryName("대출이자")).toBe("금융");
   });
 
   it("maps salary to income", () => {
@@ -149,9 +152,9 @@ describe("buildForecast", () => {
       payday: 25,
       salaries: [{ id: "s1", year: 2026, month: 9, amount: 3_200_000, received: true }],
       recurring: [
-        { id: "r1", name: "월세", amount: 500_000, dayOfMonth: 10, categoryId: null, enabled: true },
-        { id: "r2", name: "보험", amount: 85_000, dayOfMonth: 3, categoryId: null, enabled: true },
-        { id: "r3", name: "통신", amount: 69_000, dayOfMonth: 27, categoryId: null, enabled: true },
+        { id: "r1", name: "월세", amount: 500_000, dayOfMonth: 10, categoryId: null, accountId: null, enabled: true },
+        { id: "r2", name: "보험", amount: 85_000, dayOfMonth: 3, categoryId: null, accountId: null, enabled: true },
+        { id: "r3", name: "통신", amount: 69_000, dayOfMonth: 27, categoryId: null, accountId: null, enabled: true },
       ],
       recurringMarks: [],
       cards: [
@@ -197,6 +200,43 @@ describe("buildForecast", () => {
     });
     expect(forecast.salaryPending).toBe(false);
     expect(forecast.expectedBalance).toBe(1_000_000);
+  });
+
+  it("treats the 31st as the last day of a short month", () => {
+    expect(clampDay(2026, 2, 31)).toBe(28);
+    expect(clampDay(2024, 2, 31)).toBe(29);
+    expect(clampDay(2026, 4, 31)).toBe(30);
+    expect(clampDay(2026, 1, 31)).toBe(31);
+
+    const forecast = buildForecast({
+      today: { year: 2026, month: 2, day: 28 },
+      balance: 1_000_000,
+      payday: 25,
+      salaries: [],
+      recurring: [
+        { id: "rent", name: "월세", amount: 100_000, dayOfMonth: 31, categoryId: null, accountId: null, enabled: true },
+        { id: "old", name: "지난이체", amount: 50_000, dayOfMonth: 27, categoryId: null, accountId: null, enabled: true },
+      ],
+      recurringMarks: [],
+      cards: [],
+      cardMarks: [],
+      transactions: [],
+    });
+    expect(forecast.recurringPending.map((item) => item.name)).toEqual(["월세"]);
+  });
+});
+
+describe("recurringForAccount", () => {
+  const main = bank("main", "카카오뱅크", "8547", true);
+  const other = bank("other", "토스뱅크", "1234", false);
+
+  it("keeps an unassigned transfer on the main account", () => {
+    const items = [
+      { id: "r1", name: "월세", amount: 1, dayOfMonth: 10, categoryId: null, accountId: null, enabled: true },
+      { id: "r2", name: "대출", amount: 1, dayOfMonth: 31, categoryId: null, accountId: "other", enabled: true },
+    ];
+    expect(recurringForAccount(items, main, [main, other]).map((item) => item.name)).toEqual(["월세"]);
+    expect(recurringForAccount(items, other, [main, other]).map((item) => item.name)).toEqual(["대출"]);
   });
 });
 

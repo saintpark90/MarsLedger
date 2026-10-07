@@ -40,6 +40,10 @@ export function clampDay(year: number, month: number, day: number): number {
   return Math.min(Math.max(1, day), last);
 }
 
+export function recurringDayText(day: number): string {
+  return day === 31 ? "말일" : `${day}일`;
+}
+
 export function formatKoreanDate(iso: string): string {
   return new Intl.DateTimeFormat("ko-KR", {
     timeZone: SEOUL,

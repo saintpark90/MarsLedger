@@ -77,24 +77,31 @@
     "keywords": ["보험료", "보험", "적금", "대출이자", "카드론", "수수료"]
   },
   {
+    "name": "대출",
+    "kind": "expense",
+    "color": "#6b3a4a",
+    "sort": 12,
+    "keywords": ["원리금", "주택담보", "신용대출", "전세대출", "대출상환", "대출"]
+  },
+  {
     "name": "기타",
     "kind": "expense",
     "color": "#6f685e",
-    "sort": 12,
+    "sort": 13,
     "keywords": []
   },
   {
     "name": "급여",
     "kind": "income",
     "color": "#1e6a45",
-    "sort": 13,
+    "sort": 14,
     "keywords": ["급여", "월급", "상여", "보너스"]
   },
   {
     "name": "기타수입",
     "kind": "income",
     "color": "#3d7a5a",
-    "sort": 14,
+    "sort": 15,
     "keywords": ["이자", "환급", "용돈"]
   }
 ]

@@ -1,6 +1,6 @@
 import { createId } from "./defaults";
 import { last4FromText } from "./parseNotification";
-import type { BankAccount, CreditCard, LedgerSnapshot, Settings, Transaction } from "./types";
+import type { BankAccount, CreditCard, LedgerSnapshot, Recurring, Settings, Transaction } from "./types";
 
 const BANKS: { name: string; test: (compact: string) => boolean }[] = [
   { name: "카카오뱅크", test: (compact) => compact.includes("카카오뱅크") || compact.includes("kakaobank") },
@@ -138,6 +138,7 @@ export function normalizeSnapshot(snap: LedgerSnapshot): LedgerSnapshot {
     ...snap,
     accounts,
     cards: snap.cards.map((card) => ({ ...card, paymentAccountId: card.paymentAccountId ?? null })),
+    recurring: (snap.recurring ?? []).map((item) => ({ ...item, accountId: item.accountId ?? null })),
     transactions: snap.transactions.map(normalizeTransaction),
     settings: {
       ...snap.settings,
@@ -173,6 +174,14 @@ function normalizeTransaction(transaction: Transaction): Transaction {
     accountLast4: transaction.accountLast4 || last4FromText(transaction.rawText ?? "") || null,
     accountId: transaction.accountId ?? null,
   };
+}
+
+export function recurringForAccount(items: Recurring[], account: BankAccount, accounts: BankAccount[]): Recurring[] {
+  const main = accounts.find((item) => item.isMain) ?? accounts[0];
+  return items.filter((item) => {
+    const chosen = item.accountId && accounts.some((candidate) => candidate.id === item.accountId) ? item.accountId : main?.id;
+    return chosen === account.id;
+  });
 }
 
 export function accountLabel(account: BankAccount): string {

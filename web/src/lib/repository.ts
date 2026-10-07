@@ -1,7 +1,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { bankFromPackage, defaultAccount, normalizeSnapshot } from "./accounts";
 import { explainError, readConnection } from "./connection";
-import { buildDefaultCatalog } from "./defaults";
+import { buildDefaultCatalog, catalogAdditions } from "./defaults";
 import { last4FromText } from "./parseNotification";
 import type {
   BankAccount,
@@ -58,8 +58,8 @@ export function loadLocal(): LedgerSnapshot {
     const parsed = JSON.parse(raw) as { version?: number; snap?: LedgerSnapshot };
     if (parsed.version !== 1 || !parsed.snap) return persistLocal(emptySnapshot());
     const hadAccounts = Array.isArray(parsed.snap.accounts) && parsed.snap.accounts.length > 0;
-    const normalized = normalizeSnapshot(parsed.snap);
-    if (!hadAccounts) return persistLocal(normalized);
+    const normalized = withMissingCategories(normalizeSnapshot(parsed.snap));
+    if (!hadAccounts || normalized.categories.length !== (parsed.snap.categories?.length ?? 0)) return persistLocal(normalized);
     return normalized;
   } catch {
     return persistLocal(emptySnapshot());
@@ -124,6 +124,10 @@ export async function loadRemote(): Promise<LedgerSnapshot> {
     const seeded = await seedDefaults(client, userId);
     categories = seeded.categories;
     rules = seeded.rules;
+  } else {
+    const added = await insertMissingCategories(client, userId, categories, rules);
+    categories = added.categories;
+    rules = added.rules;
   }
 
   const settingsRow = settingsRes.data as Row | null;
@@ -228,9 +232,10 @@ export async function saveRecurring(item: Recurring): Promise<void> {
     amount: item.amount,
     day_of_month: item.dayOfMonth,
     category_id: item.categoryId,
+    account_id: item.accountId,
     enabled: item.enabled,
   });
-  if (error) throw new Error(explainError(error));
+  if (error) throw new Error(recurringAccountError(error));
 }
 
 export async function deleteRecurring(id: string): Promise<void> {
@@ -352,6 +357,55 @@ export async function saveSalary(salary: Salary): Promise<void> {
     { onConflict: "user_id,year,month" },
   );
   if (error) throw new Error(explainError(error));
+}
+
+function recurringAccountError(error: { message?: string; code?: string }): string {
+  const message = `${error.message ?? ""} ${error.code ?? ""}`;
+  if (/account_id|schema cache|PGRST204/i.test(message)) {
+    return "자동이체 통장을 쓰려면 Supabase SQL Editor에서 supabase/migrations/20261007120000_recurring_account.sql 을 실행해 주세요.";
+  }
+  return explainError(error);
+}
+
+async function insertMissingCategories(
+  client: SupabaseClient,
+  userId: string,
+  categories: Category[],
+  rules: Rule[],
+): Promise<{ categories: Category[]; rules: Rule[] }> {
+  const extra = catalogAdditions(categories);
+  if (extra.categories.length === 0) return { categories, rules };
+  const { error: categoryError } = await client.from("categories").insert(
+    extra.categories.map((category) => ({
+      id: category.id,
+      user_id: userId,
+      name: category.name,
+      kind: category.kind,
+      color: category.color,
+      sort_order: category.sort,
+    })),
+  );
+  if (categoryError) return { categories, rules };
+  const { error: ruleError } = await client.from("category_rules").insert(
+    extra.rules.map((rule) => ({
+      id: rule.id,
+      user_id: userId,
+      category_id: rule.categoryId,
+      keyword: rule.keyword,
+    })),
+  );
+  if (ruleError) return { categories: [...categories, ...extra.categories], rules };
+  return { categories: [...categories, ...extra.categories], rules: [...rules, ...extra.rules] };
+}
+
+function withMissingCategories(snap: LedgerSnapshot): LedgerSnapshot {
+  const extra = catalogAdditions(snap.categories);
+  if (extra.categories.length === 0) return snap;
+  return {
+    ...snap,
+    categories: [...snap.categories, ...extra.categories],
+    rules: [...snap.rules, ...extra.rules],
+  };
 }
 
 function accountTableError(error: { message?: string; code?: string }): string {
@@ -480,6 +534,7 @@ function mapRecurring(row: Row): Recurring {
     amount: Number(row.amount),
     dayOfMonth: Number(row.day_of_month),
     categoryId: (row.category_id as string | null) ?? null,
+    accountId: (row.account_id as string | null) ?? null,
     enabled: Boolean(row.enabled),
   };
 }

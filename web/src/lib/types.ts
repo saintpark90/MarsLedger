@@ -72,6 +72,7 @@ export type Recurring = {
   amount: number;
   dayOfMonth: number;
   categoryId: string | null;
+  accountId: string | null;
   enabled: boolean;
 };
 

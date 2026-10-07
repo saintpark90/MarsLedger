@@ -26,3 +26,14 @@ export function buildDefaultCatalog(): { categories: Category[]; rules: Rule[] }
   }
   return { categories, rules };
 }
+
+export function catalogAdditions(categories: Category[]): { categories: Category[]; rules: Rule[] } {
+  const seeded = buildDefaultCatalog();
+  const names = new Set(categories.map((category) => category.name));
+  const added = seeded.categories.filter((category) => !names.has(category.name));
+  const ids = new Set(added.map((category) => category.id));
+  return {
+    categories: added,
+    rules: seeded.rules.filter((rule) => ids.has(rule.categoryId)),
+  };
+}

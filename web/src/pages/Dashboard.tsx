@@ -1,10 +1,10 @@
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { useLedger } from "../context/LedgerContext";
-import { cardsPaidFrom, mainAccount, resolveAccount, transactionBank } from "../lib/accounts";
+import { cardsPaidFrom, mainAccount, recurringForAccount, resolveAccount, transactionBank } from "../lib/accounts";
 import { categoryBreakdown } from "../lib/analytics";
 import { buildForecast } from "../lib/forecast";
-import { formatKoreanDateTime, monthLabel, seoulParts, won } from "../lib/format";
+import { formatKoreanDateTime, monthLabel, recurringDayText, seoulParts, won } from "../lib/format";
 import { Button, Signed } from "../components/Ui";
 import type { LedgerSnapshot } from "../lib/types";
 
@@ -20,7 +20,7 @@ export function Dashboard() {
         balance: main.balance,
         payday: snap.settings.payday,
         salaries: snap.salaries,
-        recurring: snap.recurring,
+        recurring: recurringForAccount(snap.recurring, main, snap.accounts),
         recurringMarks: snap.recurringMarks,
         cards: cardsPaidFrom(snap.cards, main),
         cardMarks: snap.cardMarks,
@@ -42,7 +42,7 @@ export function Dashboard() {
         <p className="text-sm text-muted">{monthLabel(today.year, today.month)} 정산 후 예상 잔액</p>
         <p className="tabular mt-2 text-4xl font-semibold tracking-tight md:text-5xl">{won(forecast.expectedBalance)}</p>
         <p className="mt-2 max-w-xl text-sm leading-6 text-muted">
-          {main.name}에서 아직 빠지지 않은 자동이체와, 이 통장에서 나가는 카드대금을 빼고, 들어오기 전인 급여를 더한 금액입니다.
+          {main.name}에서 아직 빠지지 않은 자동이체와 카드대금을 빼고, 들어오기 전인 급여를 더한 금액입니다. 다른 통장으로 지정한 자동이체는 그 통장에서 계산합니다.
         </p>
       </section>
 
@@ -87,7 +87,7 @@ export function Dashboard() {
           <div className="mt-4 space-y-1 text-sm text-muted">
             {forecast.recurringPending.map((item) => (
               <p key={item.id}>
-                {item.name} · {item.dayOfMonth}일 · {won(item.amount)}
+                {item.name} · {recurringDayText(item.dayOfMonth)} · {won(item.amount)}
               </p>
             ))}
             {forecast.cardLines
@@ -111,7 +111,7 @@ export function Dashboard() {
                   balance: account.balance,
                   payday: 31,
                   salaries: [],
-                  recurring: [],
+                  recurring: recurringForAccount(snap.recurring, account, snap.accounts),
                   recurringMarks: [],
                   cards: cardsPaidFrom(snap.cards, account),
                   cardMarks: snap.cardMarks,
@@ -120,6 +120,7 @@ export function Dashboard() {
                 return (
                   <p key={account.id}>
                     {account.name} {won(account.balance)}
+                    {side.recurringPendingTotal > 0 ? ` · 자동이체 예정 ${won(side.recurringPendingTotal)}` : ""}
                     {side.cardPendingTotal > 0 ? ` · 카드 출금 예정 ${won(side.cardPendingTotal)}` : ""}
                   </p>
                 );
