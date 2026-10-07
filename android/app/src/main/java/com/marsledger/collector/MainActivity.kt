@@ -3,11 +3,13 @@ package com.marsledger.collector
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.PowerManager
 import android.provider.Settings
 import android.view.View
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SwitchCompat
 import org.json.JSONArray
@@ -16,6 +18,7 @@ class MainActivity : AppCompatActivity() {
     private val prefs by lazy { Prefs(this) }
     private val updater by lazy { AppUpdater(this) { message -> show(message) } }
     private var restoring = false
+    private var permissionDialog: AlertDialog? = null
     private val logListener: (String) -> Unit = { text ->
         findViewById<TextView>(R.id.logView).text = text
         renderStatus()
@@ -42,11 +45,7 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.listenerButton).setOnClickListener {
             startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
         }
-        findViewById<Button>(R.id.batteryButton).setOnClickListener {
-            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
-            intent.data = Uri.parse("package:$packageName")
-            startActivity(intent)
-        }
+        findViewById<Button>(R.id.batteryButton).setOnClickListener { openBatteryExemption() }
         findViewById<Button>(R.id.flushButton).setOnClickListener { Collector.flush(this) }
         if (prefs.loggedIn || (prefs.email.isNotBlank() && prefs.password.isNotBlank())) {
             findViewById<View>(R.id.emailInput).visibility = View.GONE
@@ -69,6 +68,7 @@ class MainActivity : AppCompatActivity() {
         Collector.listen(logListener)
         findViewById<TextView>(R.id.logView).text = prefs.logText
         renderStatus()
+        promptMissingPermissions()
         updater.installPendingIfAllowed()
         if (!restoring && !prefs.loggedIn && prefs.email.isNotBlank() && prefs.password.isNotBlank()) {
             restoreLogin()
@@ -155,9 +155,10 @@ class MainActivity : AppCompatActivity() {
             else -> "로그인 안 됨"
         }
         val access = if (listenerEnabled()) "알림 접근 허용" else "알림 접근 꺼짐"
+        val battery = if (batteryIgnored()) "배터리 예외 허용" else "배터리 예외 꺼짐"
         val collect = if (prefs.enabled) "수집 켜짐" else "수집 꺼짐"
         findViewById<TextView>(R.id.statusView).text =
-            "$login\n$access\n$collect\n대기 $queue 건\n버전 ${BuildConfig.VERSION_NAME}"
+            "$login\n$access\n$battery\n$collect\n대기 $queue 건\n버전 ${BuildConfig.VERSION_NAME}"
 
         val showLogin = !prefs.loggedIn && !restoring
         val loginVisibility = if (showLogin) View.VISIBLE else View.GONE
@@ -170,6 +171,50 @@ class MainActivity : AppCompatActivity() {
     private fun listenerEnabled(): Boolean {
         val flat = Settings.Secure.getString(contentResolver, "enabled_notification_listeners") ?: return false
         return flat.contains(packageName)
+    }
+
+    private fun batteryIgnored(): Boolean {
+        val manager = getSystemService(PowerManager::class.java) ?: return false
+        return manager.isIgnoringBatteryOptimizations(packageName)
+    }
+
+    private fun openBatteryExemption() {
+        val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+        intent.data = Uri.parse("package:$packageName")
+        startActivity(intent)
+    }
+
+    private fun promptMissingPermissions() {
+        if (isFinishing) return
+        val needsListener = !listenerEnabled()
+        val needsBattery = !batteryIgnored()
+        if (!needsListener && !needsBattery) {
+            permissionDialog?.dismiss()
+            permissionDialog = null
+            return
+        }
+        if (permissionDialog?.isShowing == true) return
+        val lines = buildList {
+            if (needsListener) add("• 알림 접근: 카드·은행 알림을 읽습니다.")
+            if (needsBattery) add("• 배터리 최적화 예외: 화면이 꺼져도 알림을 받습니다.")
+        }
+        val builder = AlertDialog.Builder(this)
+            .setTitle("권한이 필요합니다")
+            .setMessage("금융 알림을 모으려면 아래 권한이 필요합니다.\n\n${lines.joinToString("\n")}")
+            .setNegativeButton("나중에", null)
+        when {
+            needsListener && needsBattery -> {
+                builder.setPositiveButton("알림 접근") { _, _ ->
+                    startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                }
+                builder.setNeutralButton("배터리 예외") { _, _ -> openBatteryExemption() }
+            }
+            needsListener -> builder.setPositiveButton("허용하러 가기") { _, _ ->
+                startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+            }
+            else -> builder.setPositiveButton("허용하러 가기") { _, _ -> openBatteryExemption() }
+        }
+        permissionDialog = builder.show()
     }
 
     private fun show(message: String) {

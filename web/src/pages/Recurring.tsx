@@ -1,20 +1,22 @@
 import { useState } from "react";
 import { useLedger } from "../context/LedgerContext";
 import { Button, Field, SelectInput, TextInput } from "../components/Ui";
+import { cardsPaidFrom, mainAccount } from "../lib/accounts";
 import { buildForecast } from "../lib/forecast";
 import { monthLabel, parseAmountInput, seoulParts, won } from "../lib/format";
 
 export function RecurringPage() {
   const ledger = useLedger();
   const today = seoulParts();
+  const main = mainAccount(ledger.snap);
   const forecast = buildForecast({
     today,
-    balance: ledger.snap.settings.mainBalance,
+    balance: main.balance,
     payday: ledger.snap.settings.payday,
     salaries: ledger.snap.salaries,
     recurring: ledger.snap.recurring,
     recurringMarks: ledger.snap.recurringMarks,
-    cards: ledger.snap.cards,
+    cards: cardsPaidFrom(ledger.snap.cards, main),
     cardMarks: ledger.snap.cardMarks,
     transactions: ledger.snap.transactions,
   });

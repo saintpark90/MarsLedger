@@ -10,6 +10,17 @@ export type Settings = {
   syncBalance: boolean;
 };
 
+export type BankAccount = {
+  id: string;
+  name: string;
+  bankName: string;
+  last4: string;
+  balance: number;
+  balanceAsOf: string | null;
+  isMain: boolean;
+  createdAt: string;
+};
+
 export type Category = {
   id: string;
   name: string;
@@ -36,6 +47,10 @@ export type Transaction = {
   categoryId: string | null;
   source: TxSource;
   notificationKey: string | null;
+  packageName: string | null;
+  appLabel: string | null;
+  accountLast4: string | null;
+  accountId: string | null;
   balanceAfter: number | null;
   occurredAt: string;
   excluded: boolean;
@@ -48,6 +63,7 @@ export type CreditCard = {
   name: string;
   paymentDay: number;
   color: string;
+  paymentAccountId: string | null;
 };
 
 export type Recurring = {
@@ -87,6 +103,7 @@ export type LedgerSnapshot = {
   categories: Category[];
   rules: Rule[];
   transactions: Transaction[];
+  accounts: BankAccount[];
   cards: CreditCard[];
   recurring: Recurring[];
   salaries: Salary[];

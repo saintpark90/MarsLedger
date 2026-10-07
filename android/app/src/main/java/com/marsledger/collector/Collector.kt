@@ -105,6 +105,10 @@ object Collector {
         return try {
             ensureRules(context, prefs)
             val categoryId = resolveCategory(parsed.merchant, parsed.direction)
+            val appLabel = applicationLabel(context, packageName)
+            val fromApp = bankNameFromLabel(appLabel)
+            val instrument = parsed.instrument ?: fromApp
+            val method = if (parsed.instrument == null && fromApp != null && parsed.method == "unknown") "transfer" else parsed.method
             val row = JSONObject()
                 .put("id", UUID.randomUUID().toString())
                 .put("user_id", prefs.userId)
@@ -112,12 +116,14 @@ object Collector {
                 .put("merchant", parsed.merchant)
                 .put("raw_text", rawText)
                 .put("direction", parsed.direction)
-                .put("method", parsed.method)
-                .put("instrument", parsed.instrument ?: JSONObject.NULL)
+                .put("method", method)
+                .put("instrument", instrument ?: JSONObject.NULL)
                 .put("category_id", categoryId ?: JSONObject.NULL)
                 .put("source", "notification")
                 .put("notification_key", key)
                 .put("package_name", packageName)
+                .put("app_label", appLabel.ifBlank { JSONObject.NULL })
+                .put("account_last4", parsed.accountLast4 ?: JSONObject.NULL)
                 .put("balance_after", parsed.balanceAfter ?: JSONObject.NULL)
                 .put("occurred_at", Instant.ofEpochMilli(postedAt).toString())
                 .put("auto_categorized", true)
@@ -163,6 +169,39 @@ object Collector {
         }
         if (matched?.optString("kind") == "expense") return matched.getString("id")
         return find("기타", "expense")
+    }
+
+    private fun applicationLabel(context: Context, packageName: String): String {
+        if (packageName.isBlank()) return ""
+        return try {
+            val manager = context.packageManager
+            manager.getApplicationLabel(manager.getApplicationInfo(packageName, 0)).toString()
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
+    private fun bankNameFromLabel(label: String): String? {
+        val compact = label.replace(Regex("\\s+"), "")
+        if (compact.isEmpty()) return null
+        val lower = compact.lowercase()
+        if (lower.contains("kakaobank")) return "카카오뱅크"
+        if (lower.contains("tossbank")) return "토스뱅크"
+        val names = listOf(
+            "카카오뱅크",
+            "토스뱅크",
+            "케이뱅크",
+            "IBK기업은행",
+            "기업은행",
+            "신한은행",
+            "국민은행",
+            "우리은행",
+            "하나은행",
+            "농협은행",
+            "NH농협",
+            "토스",
+        )
+        return names.firstOrNull { compact.contains(it) }
     }
 
     private fun enqueue(prefs: Prefs, text: String, postedAt: Long, key: String, packageName: String) {

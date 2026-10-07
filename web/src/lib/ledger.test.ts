@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import categories from "../../../shared/categories.json";
+import { resolveAccount, transactionBank } from "./accounts";
 import { categoryBreakdown } from "./analytics";
 import { resolveCategoryId } from "./classify";
 import { buildForecast } from "./forecast";
 import { parseNotification } from "./parseNotification";
-import type { Category, Rule } from "./types";
+import type { BankAccount, Category, Rule, Transaction } from "./types";
 
 const catalog: Category[] = categories.map((category, index) => ({
   id: `cat-${index}`,
@@ -108,6 +109,18 @@ describe("parseNotification", () => {
   it("ignores ordinary notifications", () => {
     expect(parseNotification("카카오톡 새 메시지가 도착했습니다")).toBeNull();
   });
+
+  it("reads a kakaobank deposit that leaves the bank name off the text", () => {
+    const parsed = parseNotification("최화정 → 입 통장 8547\n+300,000원\n10월 7일 15:11 · 급여");
+    expect(parsed).toMatchObject({
+      amount: 300000,
+      merchant: "최화정 급여",
+      direction: "income",
+      method: "transfer",
+      instrument: null,
+      accountLast4: "8547",
+    });
+  });
 });
 
 describe("classify", () => {
@@ -142,8 +155,8 @@ describe("buildForecast", () => {
       ],
       recurringMarks: [],
       cards: [
-        { id: "c1", name: "삼성카드", paymentDay: 14, color: "#111" },
-        { id: "c2", name: "현대카드", paymentDay: 2, color: "#222" },
+        { id: "c1", name: "삼성카드", paymentDay: 14, color: "#111", paymentAccountId: null },
+        { id: "c2", name: "현대카드", paymentDay: 2, color: "#222", paymentAccountId: null },
       ],
       cardMarks: [],
       transactions: [
@@ -187,6 +200,45 @@ describe("buildForecast", () => {
   });
 });
 
+describe("resolveAccount", () => {
+  const kakao = bank("kakao", "카카오뱅크", "8547", true);
+  const toss = bank("toss", "토스뱅크", "8547", false);
+  const otherKakao = bank("kakao-2", "카카오뱅크", "1234", false);
+
+  it("uses the app label together with the last four digits", () => {
+    const transaction = tx("t", 300_000, "2026-10-07T06:11:00.000Z", null);
+    transaction.appLabel = "카카오뱅크";
+    transaction.packageName = "com.kakaobank.channel";
+    transaction.accountLast4 = "8547";
+    transaction.method = "transfer";
+    expect(resolveAccount(transaction, [kakao, toss])?.id).toBe("kakao");
+  });
+
+  it("reads the bank from the package when the text omitted it", () => {
+    const transaction = tx("t", 300_000, "2026-10-07T06:11:00.000Z", null);
+    transaction.packageName = "com.kakaobank.channel";
+    transaction.accountLast4 = "8547";
+    transaction.method = "transfer";
+    expect(transactionBank(transaction)).toBe("카카오뱅크");
+    expect(resolveAccount(transaction, [bank("kakao", "카카오뱅크", "", true)])?.id).toBe("kakao");
+  });
+
+  it("does not guess when only the last four digits match two banks", () => {
+    const transaction = tx("t", 300_000, "2026-10-07T06:11:00.000Z", null);
+    transaction.accountLast4 = "8547";
+    transaction.method = "transfer";
+    expect(resolveAccount(transaction, [kakao, toss])).toBeNull();
+  });
+
+  it("distinguishes two accounts at the same bank", () => {
+    const transaction = tx("t", 300_000, "2026-10-07T06:11:00.000Z", null);
+    transaction.appLabel = "KakaoBank";
+    transaction.accountLast4 = "1234";
+    transaction.method = "transfer";
+    expect(resolveAccount(transaction, [kakao, otherKakao])?.id).toBe("kakao-2");
+  });
+});
+
 describe("analytics", () => {
   it("nets refunds inside the category", () => {
     const rows = categoryBreakdown(
@@ -211,7 +263,20 @@ describe("analytics", () => {
   });
 });
 
-function tx(id: string, amount: number, occurredAt: string, cardId: string | null) {
+function bank(id: string, bankName: string, last4: string, isMain: boolean): BankAccount {
+  return {
+    id,
+    name: bankName,
+    bankName,
+    last4,
+    balance: 0,
+    balanceAsOf: null,
+    isMain,
+    createdAt: "2026-10-01T00:00:00.000Z",
+  };
+}
+
+function tx(id: string, amount: number, occurredAt: string, cardId: string | null): Transaction {
   return {
     id,
     amount,
@@ -224,6 +289,10 @@ function tx(id: string, amount: number, occurredAt: string, cardId: string | nul
     categoryId: null,
     source: "notification" as const,
     notificationKey: null,
+    packageName: null,
+    appLabel: null,
+    accountLast4: null,
+    accountId: null,
     balanceAfter: null,
     occurredAt,
     excluded: false,

@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
 import { useLedger, type NewTransaction } from "../context/LedgerContext";
+import { accountLabel, mainAccount, resolveAccount, transactionBank } from "../lib/accounts";
 import { parseNotification } from "../lib/parseNotification";
 import { formatKoreanDate, monthLabel, parseAmountInput, seoulDateKey, seoulParts, won } from "../lib/format";
 import { monthOptions } from "../lib/analytics";
-import type { Direction, PayMethod, Transaction } from "../lib/types";
+import type { BankAccount, Direction, PayMethod, Transaction } from "../lib/types";
 import { Button, Field, SelectInput, TextInput } from "../components/Ui";
 
 const methods: { value: PayMethod; label: string }[] = [
@@ -52,6 +53,7 @@ export function TransactionsPage() {
       direction: parsed.direction,
       method: parsed.method,
       instrument: parsed.instrument,
+      accountLast4: parsed.accountLast4,
       balanceAfter: parsed.balanceAfter,
       source: "notification",
       occurredAt: new Date().toISOString(),
@@ -59,13 +61,34 @@ export function TransactionsPage() {
     if (!saved) return;
     setRaw("");
     if (parsed.balanceAfter != null && ledger.snap.settings.syncBalance) {
-      const apply = window.confirm(`알림의 잔액 ${won(parsed.balanceAfter)}으로 메인 통장을 맞출까요?`);
+      const draft: Transaction = {
+        id: "draft",
+        amount: parsed.amount,
+        merchant: parsed.merchant,
+        rawText: parsed.rawText,
+        direction: parsed.direction,
+        method: parsed.method,
+        instrument: parsed.instrument,
+        cardId: null,
+        categoryId: null,
+        source: "notification",
+        notificationKey: null,
+        packageName: null,
+        appLabel: null,
+        accountLast4: parsed.accountLast4,
+        accountId: null,
+        balanceAfter: parsed.balanceAfter,
+        occurredAt: new Date().toISOString(),
+        excluded: false,
+        autoCategorized: true,
+        createdAt: new Date().toISOString(),
+      };
+      const matched = resolveAccount(draft, ledger.snap.accounts);
+      const target = matched ?? (transactionBank(draft) ? null : mainAccount(ledger.snap));
+      if (!target) return;
+      const apply = window.confirm(`알림의 잔액 ${won(parsed.balanceAfter)}으로 ${target.name}을 맞출까요?`);
       if (apply) {
-        await ledger.saveSettings({
-          ...ledger.snap.settings,
-          mainBalance: parsed.balanceAfter,
-          balanceAsOf: new Date().toISOString(),
-        });
+        await ledger.updateAccount(target.id, { balance: parsed.balanceAfter, balanceAsOf: new Date().toISOString() });
       }
     }
   }
@@ -120,7 +143,7 @@ export function TransactionsPage() {
                       {ledger.snap.categories.find((category) => category.id === transaction.categoryId)?.name ?? "미분류"}
                       {" · "}
                       {methods.find((method) => method.value === transaction.method)?.label}
-                      {transaction.instrument ? ` · ${transaction.instrument}` : ""}
+                      {placeOf(transaction, ledger.snap.accounts) ? ` · ${placeOf(transaction, ledger.snap.accounts)}` : ""}
                     </span>
                   </span>
                   <span className={`tabular font-medium ${transaction.direction === "income" ? "text-pine" : "text-ink"}`}>
@@ -201,9 +224,16 @@ function TransactionEditor({ transaction }: { transaction: Transaction }) {
   const ledger = useLedger();
   const [merchant, setMerchant] = useState(transaction.merchant);
   const [categoryId, setCategoryId] = useState(transaction.categoryId ?? "");
+  const [accountId, setAccountId] = useState(transaction.accountId ?? "");
+  const bank = transactionBank(transaction);
   return (
     <div className="space-y-3 border-t border-line px-4 py-3">
       {transaction.rawText && <p className="text-sm text-muted">{transaction.rawText}</p>}
+      {(bank || transaction.accountLast4) && (
+        <p className="text-sm text-muted">
+          {[bank ? `알림 앱 ${bank}` : "", transaction.accountLast4 ? `통장 ${transaction.accountLast4}` : ""].filter(Boolean).join(" · ")}
+        </p>
+      )}
       <div className="grid gap-3 md:grid-cols-2">
         <Field label="사용처">
           <TextInput value={merchant} onChange={(event) => setMerchant(event.target.value)} />
@@ -218,6 +248,16 @@ function TransactionEditor({ transaction }: { transaction: Transaction }) {
             ))}
           </SelectInput>
         </Field>
+        <Field label="통장">
+          <SelectInput value={accountId} onChange={(event) => setAccountId(event.target.value)}>
+            <option value="">자동</option>
+            {ledger.snap.accounts.map((account) => (
+              <option key={account.id} value={account.id}>
+                {accountLabel(account)}
+              </option>
+            ))}
+          </SelectInput>
+        </Field>
       </div>
       <div className="flex flex-wrap gap-2">
         <Button
@@ -226,6 +266,7 @@ function TransactionEditor({ transaction }: { transaction: Transaction }) {
             void ledger.updateTransaction(transaction.id, {
               merchant: merchant.trim() || transaction.merchant,
               categoryId: categoryId || null,
+              accountId: accountId || null,
             })
           }
         >
@@ -240,6 +281,18 @@ function TransactionEditor({ transaction }: { transaction: Transaction }) {
       </div>
     </div>
   );
+}
+
+function placeOf(transaction: Transaction, accounts: BankAccount[]): string {
+  const account = resolveAccount(transaction, accounts);
+  if (transaction.method === "credit" || transaction.method === "debit") {
+    return transaction.instrument ?? account?.name ?? "";
+  }
+  if (account) return account.name;
+  const bank = transactionBank(transaction);
+  const tail = transaction.accountLast4 ? ` ${transaction.accountLast4}` : "";
+  if (bank) return `${bank}${tail}`;
+  return transaction.instrument ?? (transaction.accountLast4 ? `통장 ${transaction.accountLast4}` : "");
 }
 
 function seoulInputValue(date: Date): string {

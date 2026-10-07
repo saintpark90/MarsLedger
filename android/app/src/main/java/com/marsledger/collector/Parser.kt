@@ -7,6 +7,7 @@ data class ParsedNotification(
     val method: String,
     val instrument: String?,
     val balanceAfter: Long?,
+    val accountLast4: String?,
 )
 
 private data class Instrument(val name: String, val method: String)
@@ -47,18 +48,35 @@ private val noiseWords = (
     ) + instruments.map { it.name }
     ).distinct().sortedByDescending { it.length }
 
+fun accountLast4Of(raw: String): String? {
+    val text = raw.replace(Regex("\\s+"), " ")
+    val patterns = listOf(
+        Regex("(?:입|출)?\\s*통장\\s*(\\d{4})"),
+        Regex("입출금통장\\s*\\(?\\s*(\\d{4})\\)?"),
+        Regex("계좌\\s*(?:번호)?\\s*\\(?\\s*(?:\\*+)?(\\d{4})\\)?"),
+    )
+    for (pattern in patterns) {
+        val found = pattern.find(text)?.groupValues?.getOrNull(1)
+        if (found != null) return found
+    }
+    return null
+}
+
 fun parseNotification(raw: String): ParsedNotification? {
     val text = raw.replace(Regex("\\s+"), " ").trim()
     if (text.isEmpty()) return null
     if (!Regex("[0-9][0-9,]*\\s*원").containsMatchIn(text)) return null
-    if (!Regex("승인|출금|입금|결제|이체|송금|취소").containsMatchIn(text)) return null
+    if (!Regex("승인|출금|입금|결제|이체|송금|취소|입\\s*통장|출\\s*통장").containsMatchIn(text)) return null
+    val accountLast4 = accountLast4Of(text)
 
     val balanceMatch = Regex("잔액\\s*[:：]?\\s*([0-9][0-9,]*)\\s*원").find(text)
     val balanceAfter = balanceMatch?.groupValues?.get(1)?.replace(",", "")?.toLongOrNull()
     var working = if (balanceMatch != null) text.replace(balanceMatch.value, " ") else text
 
     val isRefund = Regex("승인취소|결제취소|취소|환불").containsMatchIn(working)
-    val isIncome = !isRefund && Regex("입금|송금받|급여|월급").containsMatchIn(working)
+    val deposit = Regex("입\\s*통장|입금|송금받").containsMatchIn(working)
+    val withdraw = Regex("출\\s*통장|출금").containsMatchIn(working)
+    val isIncome = !isRefund && (deposit && !withdraw || !deposit && !withdraw && Regex("급여|월급").containsMatchIn(working))
 
     var method = "unknown"
     var instrument: String? = null
@@ -72,6 +90,7 @@ fun parseNotification(raw: String): ParsedNotification? {
     method = when {
         working.contains("체크") -> "debit"
         working.contains("신용") -> "credit"
+        Regex("입\\s*통장|출\\s*통장").containsMatchIn(working) && method == "unknown" -> "transfer"
         Regex("출금|이체|송금").containsMatchIn(working) && method == "unknown" -> "transfer"
         working.contains("승인") && method == "unknown" -> "credit"
         else -> method
@@ -82,6 +101,9 @@ fun parseNotification(raw: String): ParsedNotification? {
     if (amount <= 0) return null
 
     var merchant = working.replace(amountMatch.value, " ")
+    merchant = merchant.replace(Regex("(?:입|출)\\s*통장\\s*\\d{4}"), " ")
+    merchant = merchant.replace(Regex("입출금통장\\s*\\(?\\s*\\d{4}\\)?"), " ")
+    merchant = merchant.replace(Regex("\\d{1,2}월\\s*\\d{1,2}일"), " ")
     merchant = merchant.replace(Regex("\\d{4}[./-]\\d{1,2}[./-]\\d{1,2}"), " ")
     merchant = merchant.replace(Regex("\\d{1,2}[./]\\d{1,2}"), " ")
     merchant = merchant.replace(Regex("\\d{1,2}:\\d{2}(?::\\d{2})?"), " ")
@@ -89,7 +111,7 @@ fun parseNotification(raw: String): ParsedNotification? {
     merchant = merchant.replace(Regex("[가-힣]{1,4}\\*[가-힣]{1,4}님?"), " ")
     merchant = merchant.replace(Regex("[가-힣]{2,5}님"), " ")
     for (word in noiseWords) merchant = merchant.replace(word, " ")
-    merchant = merchant.replace(Regex("[()\\[\\]{}<>★*·|,/:._-]"), " ")
+    merchant = merchant.replace(Regex("[()\\[\\]{}<>★*·|,/:._+＋→-]"), " ")
     merchant = merchant.replace(Regex("\\s+"), " ").trim()
 
     val direction = when {
@@ -104,5 +126,6 @@ fun parseNotification(raw: String): ParsedNotification? {
         method = method,
         instrument = instrument,
         balanceAfter = balanceAfter,
+        accountLast4 = accountLast4,
     )
 }

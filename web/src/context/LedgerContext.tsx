@@ -1,9 +1,11 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { defaultAccount, mainAccount, mirrorMainBalance, resolveAccount } from "../lib/accounts";
 import { clearConnection, explainError, normalizeSupabaseUrl, readConnection, saveConnection } from "../lib/connection";
 import { resolveCategoryId } from "../lib/classify";
 import { createId } from "../lib/defaults";
 import {
   currentEmail,
+  deleteAccount,
   deleteCard,
   deleteCategory,
   deleteRecurring,
@@ -16,6 +18,7 @@ import {
   loadRemote,
   persistLocal,
   resetClientCache,
+  saveAccount,
   saveCard,
   saveCardMark,
   saveCategory,
@@ -33,6 +36,7 @@ import {
 import { buildSample } from "../lib/sample";
 import { seoulParts } from "../lib/format";
 import type {
+  BankAccount,
   CardMark,
   Category,
   CreditCard,
@@ -59,6 +63,10 @@ export type NewTransaction = {
   categoryId?: string | null;
   source: TxSource;
   notificationKey?: string | null;
+  packageName?: string | null;
+  appLabel?: string | null;
+  accountLast4?: string | null;
+  accountId?: string | null;
   balanceAfter?: number | null;
   occurredAt: string;
   autoCategorized?: boolean;
@@ -79,6 +87,9 @@ type LedgerController = {
   connectSupabase: (url: string, anonKey: string) => string | null;
   disconnectSupabase: () => Promise<void>;
   saveSettings: (settings: Settings) => Promise<boolean>;
+  addAccount: (input: { name: string; bankName: string; last4: string; balance: number; isMain?: boolean }) => Promise<boolean>;
+  updateAccount: (id: string, patch: Partial<BankAccount>) => Promise<boolean>;
+  deleteAccount: (id: string) => Promise<boolean>;
   saveSalary: (year: number, month: number, amount: number, received: boolean) => Promise<boolean>;
   clearSalary: (year: number, month: number) => Promise<boolean>;
   addTransaction: (input: NewTransaction) => Promise<boolean>;
@@ -93,7 +104,7 @@ type LedgerController = {
   updateRecurring: (id: string, patch: Partial<Recurring>) => Promise<boolean>;
   deleteRecurring: (id: string) => Promise<boolean>;
   setRecurringSettled: (id: string, year: number, month: number, settled: boolean | null) => Promise<boolean>;
-  addCard: (name: string, paymentDay: number, color: string) => Promise<boolean>;
+  addCard: (name: string, paymentDay: number, color: string, paymentAccountId?: string | null) => Promise<boolean>;
   updateCard: (id: string, patch: Partial<CreditCard>) => Promise<boolean>;
   deleteCard: (id: string) => Promise<boolean>;
   setCardMark: (mark: CardMark) => Promise<boolean>;
@@ -239,7 +250,82 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         resetClientCache();
         window.location.reload();
       },
-      saveSettings: (settings) => commit({ ...snap, settings }, () => saveSettings(settings)),
+      saveSettings: (settings) => {
+        const main = mainAccount(snap);
+        const accounts = snap.accounts.map((account) =>
+          account.id === main.id ? { ...account, balance: settings.mainBalance, balanceAsOf: settings.balanceAsOf } : account,
+        );
+        const next = { ...snap, settings, accounts };
+        return commit(next, async () => {
+          await saveSettings(settings);
+          const updated = accounts.find((account) => account.id === main.id);
+          if (updated) await saveAccount(updated);
+        });
+      },
+      addAccount: (input) => {
+        const tail = input.last4.trim();
+        if (tail && !/^\d{4}$/.test(tail)) return Promise.resolve(false);
+        const account: BankAccount = {
+          id: createId(),
+          name: input.name.trim() || input.bankName.trim() || "통장",
+          bankName: input.bankName.trim(),
+          last4: tail,
+          balance: input.balance,
+          balanceAsOf: new Date().toISOString(),
+          isMain: input.isMain ?? snap.accounts.length === 0,
+          createdAt: new Date().toISOString(),
+        };
+        const accounts = account.isMain
+          ? [...snap.accounts.map((item) => ({ ...item, isMain: false })), account]
+          : [...snap.accounts, account];
+        const next = mirrorMainBalance({ ...snap, accounts });
+        return commit(next, async () => {
+          await saveAccount(account);
+          await saveSettings(next.settings);
+        });
+      },
+      updateAccount: (id, patch) => {
+        const current = snap.accounts.find((account) => account.id === id);
+        if (!current) return Promise.resolve(false);
+        const tail = patch.last4 !== undefined ? patch.last4.trim() : current.last4;
+        if (tail && !/^\d{4}$/.test(tail)) return Promise.resolve(false);
+        let accounts = snap.accounts.map((account) => (account.id === id ? { ...account, ...patch, last4: tail } : account));
+        if (patch.isMain) accounts = accounts.map((account) => ({ ...account, isMain: account.id === id }));
+        if (!accounts.some((account) => account.isMain) && accounts[0]) {
+          accounts = accounts.map((account, index) => ({ ...account, isMain: index === 0 }));
+        }
+        const next = mirrorMainBalance({ ...snap, accounts });
+        return commit(next, async () => {
+          const changed = next.accounts.find((account) => account.id === id);
+          if (!changed) return;
+          await saveAccount(changed);
+          if (patch.isMain) {
+            for (const account of next.accounts) {
+              if (account.id !== id) await saveAccount(account);
+            }
+          }
+          await saveSettings(next.settings);
+        });
+      },
+      deleteAccount: (id) => {
+        let accounts = snap.accounts.filter((account) => account.id !== id);
+        if (accounts.length === 0) {
+          accounts = [defaultAccount({ ...snap.settings, mainBalance: 0, balanceAsOf: null })];
+        } else if (!accounts.some((account) => account.isMain)) {
+          accounts = accounts.map((account, index) => ({ ...account, isMain: index === 0 }));
+        }
+        const cards = snap.cards.map((card) => (card.paymentAccountId === id ? { ...card, paymentAccountId: null } : card));
+        const transactions = snap.transactions.map((transaction) =>
+          transaction.accountId === id ? { ...transaction, accountId: null } : transaction,
+        );
+        const next = mirrorMainBalance({ ...snap, accounts, cards, transactions });
+        return commit(next, async () => {
+          await deleteAccount(id);
+          const promoted = next.accounts.find((account) => account.isMain);
+          if (promoted) await saveAccount(promoted);
+          await saveSettings(next.settings);
+        });
+      },
       saveSalary: (year, month, amount, received) => {
         const existing = snap.salaries.find((salary) => salary.year === year && salary.month === month);
         const salary = { id: existing?.id ?? createId(), year, month, amount, received };
@@ -258,7 +344,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
           input.categoryId !== undefined
             ? { categoryId: input.categoryId, autoCategorized: input.autoCategorized ?? input.categoryId === null }
             : resolveCategoryId(input.merchant, input.direction, snap.categories, snap.rules);
-        const transaction: Transaction = {
+        const draft: Transaction = {
           id: createId(),
           amount: input.amount,
           merchant: input.merchant,
@@ -270,11 +356,19 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
           categoryId: resolved.categoryId,
           source: input.source,
           notificationKey: input.notificationKey ?? null,
+          packageName: input.packageName ?? null,
+          appLabel: input.appLabel ?? null,
+          accountLast4: input.accountLast4 ?? null,
+          accountId: null,
           balanceAfter: input.balanceAfter ?? null,
           occurredAt: input.occurredAt,
           excluded: false,
           autoCategorized: input.autoCategorized ?? resolved.autoCategorized,
           createdAt: new Date().toISOString(),
+        };
+        const transaction: Transaction = {
+          ...draft,
+          accountId: input.accountId !== undefined ? input.accountId : (resolveAccount(draft, snap.accounts)?.id ?? null),
         };
         return commit({ ...snap, transactions: [transaction, ...snap.transactions] }, () => saveTransaction(transaction));
       },
@@ -374,8 +468,8 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
           else await saveRecurringMark({ recurringId: id, year, month, settled });
         });
       },
-      addCard: (name, paymentDay, color) => {
-        const card: CreditCard = { id: createId(), name: name.trim(), paymentDay, color };
+      addCard: (name, paymentDay, color, paymentAccountId = null) => {
+        const card: CreditCard = { id: createId(), name: name.trim(), paymentDay, color, paymentAccountId };
         const transactions = snap.transactions.map((transaction) =>
           !transaction.cardId && instrumentMatches(transaction.instrument, card.name)
             ? { ...transaction, cardId: card.id }

@@ -7,6 +7,7 @@ export type ParsedNotification = {
   method: PayMethod;
   instrument: string | null;
   balanceAfter: number | null;
+  accountLast4: string | null;
   rawText: string;
 };
 
@@ -66,12 +67,27 @@ const NOISE = [
   ...INSTRUMENTS.map((item) => item.name),
 ];
 
+export function last4FromText(raw: string): string | null {
+  const text = raw.replace(/\s+/g, " ");
+  const patterns = [
+    /(?:입|출)?\s*통장\s*(\d{4})/,
+    /입출금통장\s*\(?\s*(\d{4})\)?/,
+    /계좌\s*(?:번호)?\s*\(?\s*(?:\*+)?(\d{4})\)?/,
+  ];
+  for (const pattern of patterns) {
+    const found = text.match(pattern);
+    if (found) return found[1];
+  }
+  return null;
+}
+
 export function parseNotification(raw: string): ParsedNotification | null {
   const text = raw.replace(/\s+/g, " ").trim();
   if (!text) return null;
   const hasWon = /[0-9][0-9,]*\s*원/.test(text);
-  const hasAction = /(승인|출금|입금|결제|이체|송금|취소)/.test(text);
+  const hasAction = /(승인|출금|입금|결제|이체|송금|취소|입\s*통장|출\s*통장)/.test(text);
   if (!hasWon || !hasAction) return null;
+  const accountLast4 = last4FromText(text);
 
   const balanceMatch = text.match(/잔액\s*[:：]?\s*([0-9][0-9,]*)\s*원/);
   const balanceAfter = balanceMatch ? Number(balanceMatch[1].replace(/,/g, "")) : null;
@@ -80,7 +96,9 @@ export function parseNotification(raw: string): ParsedNotification | null {
   if (balanceMatch) working = working.replace(balanceMatch[0], " ");
 
   const isRefund = /(승인취소|결제취소|취소|환불)/.test(working);
-  const isIncome = !isRefund && /(입금|송금받|급여|월급)/.test(working);
+  const deposit = /(입\s*통장|입금|송금받)/.test(working);
+  const withdraw = /(출\s*통장|출금)/.test(working);
+  const isIncome = !isRefund && (deposit && !withdraw || (!deposit && !withdraw && /(급여|월급)/.test(working)));
 
   let method: PayMethod = "unknown";
   let instrument: string | null = null;
@@ -94,6 +112,7 @@ export function parseNotification(raw: string): ParsedNotification | null {
   }
   if (/체크/.test(working)) method = "debit";
   else if (/신용/.test(working)) method = "credit";
+  else if (/(입\s*통장|출\s*통장)/.test(working) && method === "unknown") method = "transfer";
   else if (/(출금|이체|송금)/.test(working) && method === "unknown") method = "transfer";
   else if (/승인/.test(working) && method === "unknown") method = "credit";
 
@@ -103,6 +122,9 @@ export function parseNotification(raw: string): ParsedNotification | null {
   if (!Number.isFinite(amount) || amount <= 0) return null;
 
   let merchantSource = working.replace(amountMatch[0], " ");
+  merchantSource = merchantSource.replace(/(?:입|출)\s*통장\s*\d{4}/g, " ");
+  merchantSource = merchantSource.replace(/입출금통장\s*\(?\s*\d{4}\)?/g, " ");
+  merchantSource = merchantSource.replace(/\d{1,2}월\s*\d{1,2}일/g, " ");
   merchantSource = merchantSource.replace(/\d{4}[./-]\d{1,2}[./-]\d{1,2}/g, " ");
   merchantSource = merchantSource.replace(/\d{1,2}[./]\d{1,2}/g, " ");
   merchantSource = merchantSource.replace(/\d{1,2}:\d{2}(?::\d{2})?/g, " ");
@@ -114,7 +136,7 @@ export function parseNotification(raw: string): ParsedNotification | null {
   for (const word of noise) {
     merchantSource = merchantSource.split(word).join(" ");
   }
-  merchantSource = merchantSource.replace(/[()[\]{}<>★*·|,/:._-]/g, " ");
+  merchantSource = merchantSource.replace(/[()[\]{}<>★*·|,/:._+＋→-]/g, " ");
   merchantSource = merchantSource.replace(/\s+/g, " ").trim();
 
   const direction: Direction = isRefund ? "refund" : isIncome ? "income" : "expense";
@@ -125,6 +147,7 @@ export function parseNotification(raw: string): ParsedNotification | null {
     method,
     instrument,
     balanceAfter,
+    accountLast4,
     rawText: raw.trim(),
   };
 }

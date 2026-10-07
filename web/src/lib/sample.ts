@@ -1,7 +1,7 @@
 import { resolveCategoryId } from "./classify";
 import { createId } from "./defaults";
 import { previousMonth } from "./format";
-import type { CreditCard, LedgerSnapshot, Recurring, Transaction, YMD } from "./types";
+import type { BankAccount, CreditCard, LedgerSnapshot, Recurring, Transaction, YMD } from "./types";
 
 function at(year: number, month: number, day: number, hour = 12): string {
   const stamp = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}T${String(hour).padStart(2, "0")}:10:00+09:00`;
@@ -34,6 +34,10 @@ function makeTx(
     categoryId: resolved.categoryId,
     source: "notification",
     notificationKey: null,
+    packageName: null,
+    appLabel: null,
+    accountLast4: null,
+    accountId: null,
     balanceAfter: null,
     occurredAt: input.when,
     excluded: false,
@@ -48,8 +52,18 @@ export function buildSample(base: LedgerSnapshot, today: YMD): LedgerSnapshot {
   const housing = base.categories.find((category) => category.name === "주거·공과금")?.id ?? null;
   const finance = base.categories.find((category) => category.name === "금융")?.id ?? null;
   const telecom = base.categories.find((category) => category.name === "통신")?.id ?? null;
-  const samsung: CreditCard = { id: createId(), name: "삼성카드", paymentDay: 14, color: "#1a4f8b" };
-  const hyundai: CreditCard = { id: createId(), name: "현대카드", paymentDay: 2, color: "#222222" };
+  const kakao: BankAccount = {
+    id: createId(),
+    name: "카카오뱅크",
+    bankName: "카카오뱅크",
+    last4: "8547",
+    balance: 2_500_000,
+    balanceAsOf: new Date().toISOString(),
+    isMain: true,
+    createdAt: new Date().toISOString(),
+  };
+  const samsung: CreditCard = { id: createId(), name: "삼성카드", paymentDay: 14, color: "#1a4f8b", paymentAccountId: kakao.id };
+  const hyundai: CreditCard = { id: createId(), name: "현대카드", paymentDay: 2, color: "#222222", paymentAccountId: kakao.id };
   const recurring: Recurring[] = [
     { id: createId(), name: "월세", amount: 500_000, dayOfMonth: 10, categoryId: housing, enabled: true },
     { id: createId(), name: "보험", amount: 85_000, dayOfMonth: 3, categoryId: finance, enabled: true },
@@ -89,6 +103,7 @@ export function buildSample(base: LedgerSnapshot, today: YMD): LedgerSnapshot {
       payday: 25,
       syncBalance: true,
     },
+    accounts: [kakao],
     cards: [samsung, hyundai],
     recurring,
     salaries: [{ id: createId(), year: prev.year, month: prev.month, amount: 3_200_000, received: true }],

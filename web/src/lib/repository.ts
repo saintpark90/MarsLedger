@@ -1,7 +1,10 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { bankFromPackage, defaultAccount, normalizeSnapshot } from "./accounts";
 import { explainError, readConnection } from "./connection";
 import { buildDefaultCatalog } from "./defaults";
+import { last4FromText } from "./parseNotification";
 import type {
+  BankAccount,
   CardMark,
   Category,
   CreditCard,
@@ -33,11 +36,13 @@ export function supabaseClient(config = readConnection()): SupabaseClient | null
 
 export function emptySnapshot(): LedgerSnapshot {
   const { categories, rules } = buildDefaultCatalog();
+  const settings = { mainBalance: 0, balanceAsOf: null, payday: 25, syncBalance: true };
   return {
-    settings: { mainBalance: 0, balanceAsOf: null, payday: 25, syncBalance: true },
+    settings,
     categories,
     rules,
     transactions: [],
+    accounts: [defaultAccount(settings)],
     cards: [],
     recurring: [],
     salaries: [],
@@ -52,7 +57,10 @@ export function loadLocal(): LedgerSnapshot {
     if (!raw) return persistLocal(emptySnapshot());
     const parsed = JSON.parse(raw) as { version?: number; snap?: LedgerSnapshot };
     if (parsed.version !== 1 || !parsed.snap) return persistLocal(emptySnapshot());
-    return parsed.snap;
+    const hadAccounts = Array.isArray(parsed.snap.accounts) && parsed.snap.accounts.length > 0;
+    const normalized = normalizeSnapshot(parsed.snap);
+    if (!hadAccounts) return persistLocal(normalized);
+    return normalized;
   } catch {
     return persistLocal(emptySnapshot());
   }
@@ -92,18 +100,20 @@ export async function currentEmail(): Promise<string | null> {
 export async function loadRemote(): Promise<LedgerSnapshot> {
   const client = requiredClient();
   const userId = await userIdOf(client);
-  const [settingsRes, categoriesRes, rulesRes, txRes, cardsRes, recurringRes, salaryRes, recurringMarksRes, cardMarksRes] =
+  const [settingsRes, categoriesRes, rulesRes, txRes, accountsRes, cardsRes, recurringRes, salaryRes, recurringMarksRes, cardMarksRes] =
     await Promise.all([
       client.from("user_settings").select("*").eq("user_id", userId).maybeSingle(),
       client.from("categories").select("*").eq("user_id", userId).order("sort_order"),
       client.from("category_rules").select("*").eq("user_id", userId),
       client.from("transactions").select("*").eq("user_id", userId).order("occurred_at", { ascending: false }).limit(5000),
+      client.from("bank_accounts").select("*").eq("user_id", userId).order("created_at"),
       client.from("credit_cards").select("*").eq("user_id", userId).order("created_at"),
       client.from("recurring_transfers").select("*").eq("user_id", userId).order("day_of_month"),
       client.from("salary_entries").select("*").eq("user_id", userId),
       client.from("recurring_marks").select("*").eq("user_id", userId),
       client.from("card_marks").select("*").eq("user_id", userId),
     ]);
+  if (accountsRes.error) throw new Error(accountTableError(accountsRes.error));
   for (const result of [settingsRes, categoriesRes, rulesRes, txRes, cardsRes, recurringRes, salaryRes, recurringMarksRes, cardMarksRes]) {
     if (result.error) throw new Error(explainError(result.error));
   }
@@ -117,7 +127,7 @@ export async function loadRemote(): Promise<LedgerSnapshot> {
   }
 
   const settingsRow = settingsRes.data as Row | null;
-  return {
+  const loaded = {
     settings: settingsRow
       ? {
           mainBalance: Number(settingsRow.main_balance ?? 0),
@@ -129,12 +139,14 @@ export async function loadRemote(): Promise<LedgerSnapshot> {
     categories,
     rules,
     transactions: ((txRes.data ?? []) as Row[]).map(mapTransaction),
+    accounts: ((accountsRes.data ?? []) as Row[]).map(mapAccount),
     cards: ((cardsRes.data ?? []) as Row[]).map(mapCard),
     recurring: ((recurringRes.data ?? []) as Row[]).map(mapRecurring),
     salaries: ((salaryRes.data ?? []) as Row[]).map(mapSalary),
     recurringMarks: ((recurringMarksRes.data ?? []) as Row[]).map(mapRecurringMark),
     cardMarks: ((cardMarksRes.data ?? []) as Row[]).map(mapCardMark),
   };
+  return normalizeSnapshot(loaded);
 }
 
 export async function saveSettings(settings: Settings): Promise<void> {
@@ -260,7 +272,36 @@ export async function saveCard(card: CreditCard): Promise<void> {
     name: card.name,
     payment_day: card.paymentDay,
     color: card.color,
+    payment_account_id: card.paymentAccountId,
   });
+  if (error) throw new Error(explainError(error));
+}
+
+export async function saveAccount(account: BankAccount): Promise<void> {
+  const client = requiredClient();
+  const userId = await userIdOf(client);
+  const last4 = /^\d{4}$/.test(account.last4) ? account.last4 : null;
+  if (account.isMain) {
+    const { error } = await client.from("bank_accounts").update({ is_main: false }).eq("user_id", userId).neq("id", account.id);
+    if (error) throw new Error(explainError(error));
+  }
+  const { error } = await client.from("bank_accounts").upsert({
+    id: account.id,
+    user_id: userId,
+    name: account.name,
+    bank_name: account.bankName.trim(),
+    last4,
+    balance: account.balance,
+    balance_as_of: account.balanceAsOf,
+    is_main: account.isMain,
+    created_at: account.createdAt,
+  });
+  if (error) throw new Error(explainError(error));
+}
+
+export async function deleteAccount(id: string): Promise<void> {
+  const client = requiredClient();
+  const { error } = await client.from("bank_accounts").delete().eq("id", id);
   if (error) throw new Error(explainError(error));
 }
 
@@ -311,6 +352,14 @@ export async function saveSalary(salary: Salary): Promise<void> {
     { onConflict: "user_id,year,month" },
   );
   if (error) throw new Error(explainError(error));
+}
+
+function accountTableError(error: { message?: string; code?: string }): string {
+  const message = `${error.message ?? ""} ${error.code ?? ""}`;
+  if (/bank_accounts|schema cache|does not exist|PGRST205|could not find the table/i.test(message)) {
+    return "통장 기능을 쓰려면 Supabase SQL Editor에서 supabase/migrations/20261007000000_accounts.sql 을 실행해 주세요.";
+  }
+  return explainError(error);
 }
 
 function requiredClient(): SupabaseClient {
@@ -389,6 +438,10 @@ function mapTransaction(row: Row): Transaction {
     categoryId: (row.category_id as string | null) ?? null,
     source: row.source === "manual" ? "manual" : "notification",
     notificationKey: (row.notification_key as string | null) ?? null,
+    packageName: (row.package_name as string | null) ?? null,
+    appLabel: (row.app_label as string | null) ?? bankFromPackage(row.package_name as string | null),
+    accountLast4: (row.account_last4 as string | null) ?? last4FromText(String(row.raw_text ?? "")) ,
+    accountId: (row.account_id as string | null) ?? null,
     balanceAfter: row.balance_after == null ? null : Number(row.balance_after),
     occurredAt: String(row.occurred_at),
     excluded: Boolean(row.excluded),
@@ -403,6 +456,20 @@ function mapCard(row: Row): CreditCard {
     name: String(row.name),
     paymentDay: Number(row.payment_day),
     color: String(row.color ?? "#1e6a45"),
+    paymentAccountId: (row.payment_account_id as string | null) ?? null,
+  };
+}
+
+function mapAccount(row: Row): BankAccount {
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    bankName: String(row.bank_name ?? ""),
+    last4: row.last4 == null ? "" : String(row.last4),
+    balance: Number(row.balance ?? 0),
+    balanceAsOf: (row.balance_as_of as string | null) ?? null,
+    isMain: Boolean(row.is_main),
+    createdAt: String(row.created_at ?? new Date().toISOString()),
   };
 }
 
@@ -464,6 +531,10 @@ function toTransactionRow(transaction: Transaction, userId: string) {
     category_id: transaction.categoryId,
     source: transaction.source,
     notification_key: transaction.notificationKey,
+    package_name: transaction.packageName,
+    app_label: transaction.appLabel,
+    account_last4: /^\d{4}$/.test(transaction.accountLast4 ?? "") ? transaction.accountLast4 : null,
+    account_id: transaction.accountId,
     balance_after: transaction.balanceAfter,
     occurred_at: transaction.occurredAt,
     excluded: transaction.excluded,

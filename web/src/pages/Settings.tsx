@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useLedger } from "../context/LedgerContext";
+import { accountLabel, mainAccount, unseenSignals } from "../lib/accounts";
 import { readConnection } from "../lib/connection";
 import { monthLabel, parseAmountInput, previousMonth, seoulParts, won } from "../lib/format";
 import { useInstallPrompt } from "../components/useInstall";
 import { Button, Field, TextInput } from "../components/Ui";
+import type { BankAccount } from "../lib/types";
 
 export function SettingsPage() {
   const ledger = useLedger();
@@ -12,8 +14,13 @@ export function SettingsPage() {
   const previous = previousMonth(today.year, today.month);
   const install = useInstallPrompt();
   const connection = readConnection();
-  const [balance, setBalance] = useState(String(ledger.snap.settings.mainBalance || ""));
   const [payday, setPayday] = useState(String(ledger.snap.settings.payday));
+  const [accountName, setAccountName] = useState("");
+  const [bankName, setBankName] = useState("");
+  const [last4, setLast4] = useState("");
+  const [accountBalance, setAccountBalance] = useState("");
+  const main = mainAccount(ledger.snap);
+  const signals = unseenSignals(ledger.snap.transactions, ledger.snap.accounts);
   const currentSalary = ledger.snap.salaries.find((salary) => salary.year === today.year && salary.month === today.month);
   const previousSalary = ledger.snap.salaries.find((salary) => salary.year === previous.year && salary.month === previous.month);
   const [currentAmount, setCurrentAmount] = useState(currentSalary ? String(currentSalary.amount) : "");
@@ -26,15 +33,94 @@ export function SettingsPage() {
     <div className="space-y-5">
       <div>
         <h2 className="text-2xl font-semibold">설정</h2>
-        <p className="text-sm text-muted">통장 잔액, 급여일, 서버 연결을 여기서 관리합니다.</p>
+        <p className="text-sm text-muted">통장을 여러 개 등록하고, 그 중 하나를 메인 통장으로 둡니다.</p>
       </div>
 
-      <section className="sheet space-y-3 p-4">
-        <h3 className="font-semibold">메인 통장</h3>
-        <div className="grid gap-3 md:grid-cols-2">
-          <Field label="현재 잔액">
-            <TextInput inputMode="numeric" value={balance} onChange={(event) => setBalance(event.target.value)} />
+      <section className="sheet space-y-4 p-4">
+        <div>
+          <h3 className="font-semibold">통장</h3>
+          <p className="mt-1 text-sm text-muted">
+            알림을 보낸 앱 이름(카카오뱅크)으로 은행을 구분하고, 알림의 통장 뒤 4자리가 있으면 같은 은행의 통장도 나눕니다. 예상 잔액과 자동이체, 급여는 메인 통장 기준입니다.
+          </p>
+        </div>
+        {signals.length > 0 && (
+          <div className="space-y-2">
+            {signals.map((signal) => (
+              <div key={`${signal.bankName}-${signal.last4}`} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white px-3 py-2 text-sm">
+                <p>
+                  알림에서 <strong>{signal.bankName || "통장"}{signal.last4 ? ` ${signal.last4}` : ""}</strong>을 찾았습니다.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    tone="pine"
+                    onClick={() =>
+                      void ledger.updateAccount(main.id, {
+                        bankName: signal.bankName || main.bankName,
+                        last4: signal.last4 || main.last4,
+                        name: main.name === "메인 통장" && signal.bankName ? signal.bankName : main.name,
+                      })
+                    }
+                  >
+                    메인 통장으로 연결
+                  </Button>
+                  <Button
+                    tone="ghost"
+                    onClick={() =>
+                      void ledger.addAccount({
+                        name: signal.bankName || `통장 ${signal.last4}`,
+                        bankName: signal.bankName,
+                        last4: signal.last4,
+                        balance: 0,
+                      })
+                    }
+                  >
+                    새 통장으로 추가
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="space-y-3">
+          {ledger.snap.accounts.map((account) => (
+            <AccountEditor key={account.id} account={account} canDelete={ledger.snap.accounts.length > 1} />
+          ))}
+        </div>
+        <div className="grid gap-3 border-t border-line pt-3 md:grid-cols-4">
+          <Field label="통장 이름">
+            <TextInput value={accountName} onChange={(event) => setAccountName(event.target.value)} placeholder="생활비" />
           </Field>
+          <Field label="알림 앱 이름">
+            <TextInput value={bankName} onChange={(event) => setBankName(event.target.value)} placeholder="카카오뱅크" />
+          </Field>
+          <Field label="끝 4자리">
+            <TextInput inputMode="numeric" value={last4} onChange={(event) => setLast4(event.target.value)} placeholder="8547" />
+          </Field>
+          <Field label="현재 잔액">
+            <TextInput inputMode="numeric" value={accountBalance} onChange={(event) => setAccountBalance(event.target.value)} />
+          </Field>
+        </div>
+        <Button
+          tone="ink"
+          onClick={() => {
+            const tail = last4.trim();
+            if (tail && !/^\d{4}$/.test(tail)) return;
+            if (!accountName.trim() && !bankName.trim()) return;
+            void ledger.addAccount({
+              name: accountName,
+              bankName,
+              last4: tail,
+              balance: parseAmountInput(accountBalance),
+            });
+            setAccountName("");
+            setBankName("");
+            setLast4("");
+            setAccountBalance("");
+          }}
+        >
+          통장 추가
+        </Button>
+        <div className="grid gap-3 md:grid-cols-2">
           <Field label="급여일">
             <TextInput inputMode="numeric" value={payday} onChange={(event) => setPayday(event.target.value)} />
           </Field>
@@ -45,26 +131,18 @@ export function SettingsPage() {
             checked={ledger.snap.settings.syncBalance}
             onChange={(event) => void ledger.saveSettings({ ...ledger.snap.settings, syncBalance: event.target.checked })}
           />
-          알림에 잔액이 있으면 갱신을 제안
+          알림에 잔액이 있으면 그 통장 잔액 갱신을 제안
         </label>
         <Button
-          tone="ink"
+          tone="ghost"
           onClick={() => {
             const day = Number(payday);
             if (day < 1 || day > 31) return;
-            void ledger.saveSettings({
-              ...ledger.snap.settings,
-              mainBalance: parseAmountInput(balance),
-              payday: day,
-              balanceAsOf: new Date().toISOString(),
-            });
+            void ledger.saveSettings({ ...ledger.snap.settings, payday: day });
           }}
         >
-          잔액과 급여일 저장
+          급여일 저장
         </Button>
-        {ledger.snap.settings.balanceAsOf && (
-          <p className="text-sm text-muted">마지막 잔액 기준 {new Date(ledger.snap.settings.balanceAsOf).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })}</p>
-        )}
       </section>
 
       <section className="sheet space-y-3 p-4">
@@ -112,8 +190,8 @@ export function SettingsPage() {
 
       <section className="sheet space-y-2 p-4 text-sm leading-6">
         <h3 className="font-semibold">계산 기준</h3>
-        <p>현재 메인 통장 잔액에서 오늘 포함 아직 지나지 않은 자동이체를 뺍니다.</p>
-        <p>카드 청구액은 지난달 신용 결제 합계이고, 직접 입력한 금액이 있으면 그 값을 씁니다. 결제일이 지나기 전이면 빼고, 지난 뒤면 이미 빠진 것으로 봅니다.</p>
+        <p>현재 메인 통장 잔액에서 오늘 포함 아직 지나지 않은 자동이체를 뺍니다. 자동이체는 메인 통장에서 나가는 것으로 계산합니다.</p>
+        <p>카드 청구액은 지난달 신용 결제 합계이고, 직접 입력한 금액이 있으면 그 값을 씁니다. 각 카드에 지정한 통장에서, 결제일이 지나기 전이면 빼고 지난 뒤면 이미 빠진 것으로 봅니다.</p>
         <p>급여일이 되기 전이거나 이번 달 급여를 미입금으로 표시하면 급여를 더합니다. 이번 달 급여가 비어 있으면 지난달 금액입니다.</p>
         <p>
           카드와 분류 규칙은 <Link className="text-pine" to="/cards">카드</Link>, <Link className="text-pine" to="/rules">분류</Link>에서 수정합니다.
@@ -185,6 +263,84 @@ export function SettingsPage() {
           </div>
         </section>
       )}
+    </div>
+  );
+}
+
+function AccountEditor({ account, canDelete }: { account: BankAccount; canDelete: boolean }) {
+  const ledger = useLedger();
+  const [name, setName] = useState(account.name);
+  const [bankName, setBankName] = useState(account.bankName);
+  const [last4, setLast4] = useState(account.last4);
+  const [balance, setBalance] = useState(String(account.balance || ""));
+
+  useEffect(() => {
+    setName(account.name);
+    setBankName(account.bankName);
+    setLast4(account.last4);
+    setBalance(String(account.balance || ""));
+  }, [account.name, account.bankName, account.last4, account.balance]);
+
+  return (
+    <div className="rounded-xl border border-line p-3">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <p className="font-medium">
+          {accountLabel(account)}
+          {account.isMain ? " · 메인" : ""}
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {!account.isMain && (
+            <Button tone="ghost" onClick={() => void ledger.updateAccount(account.id, { isMain: true })}>
+              메인으로
+            </Button>
+          )}
+          {canDelete && (
+            <Button
+              tone="clay"
+              onClick={() => {
+                if (window.confirm(`${account.name} 통장을 삭제할까요?`)) void ledger.deleteAccount(account.id);
+              }}
+            >
+              삭제
+            </Button>
+          )}
+        </div>
+      </div>
+      <div className="grid gap-3 md:grid-cols-4">
+        <Field label="이름">
+          <TextInput value={name} onChange={(event) => setName(event.target.value)} />
+        </Field>
+        <Field label="알림 앱 이름">
+          <TextInput value={bankName} onChange={(event) => setBankName(event.target.value)} placeholder="카카오뱅크" />
+        </Field>
+        <Field label="끝 4자리">
+          <TextInput inputMode="numeric" value={last4} onChange={(event) => setLast4(event.target.value)} placeholder="8547" />
+        </Field>
+        <Field label="현재 잔액">
+          <TextInput inputMode="numeric" value={balance} onChange={(event) => setBalance(event.target.value)} />
+        </Field>
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <Button
+          tone="ink"
+          onClick={() => {
+            const tail = last4.trim();
+            if (tail && !/^\d{4}$/.test(tail)) return;
+            void ledger.updateAccount(account.id, {
+              name: name.trim() || account.name,
+              bankName: bankName.trim(),
+              last4: tail,
+              balance: parseAmountInput(balance),
+              balanceAsOf: new Date().toISOString(),
+            });
+          }}
+        >
+          저장
+        </Button>
+        {account.balanceAsOf && (
+          <p className="text-sm text-muted">잔액 기준 {new Date(account.balanceAsOf).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })}</p>
+        )}
+      </div>
     </div>
   );
 }

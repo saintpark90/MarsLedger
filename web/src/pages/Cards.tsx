@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useLedger } from "../context/LedgerContext";
-import { Button, Field, TextInput } from "../components/Ui";
+import { Button, Field, SelectInput, TextInput } from "../components/Ui";
+import { accountLabel, mainAccount } from "../lib/accounts";
 import { buildForecast } from "../lib/forecast";
 import { parseAmountInput, seoulParts, won } from "../lib/format";
 import type { CreditCard } from "../lib/types";
@@ -21,6 +22,10 @@ export function CardsPage() {
   });
   const [name, setName] = useState("");
   const [paymentDay, setPaymentDay] = useState("14");
+  const [paymentAccountId, setPaymentAccountId] = useState(mainAccount(ledger.snap).id);
+  const selectedAccountId = ledger.snap.accounts.some((account) => account.id === paymentAccountId)
+    ? paymentAccountId
+    : mainAccount(ledger.snap).id;
   const orphans = unmatched(ledger.snap.transactions, ledger.snap.cards);
 
   return (
@@ -28,23 +33,32 @@ export function CardsPage() {
       <div>
         <h2 className="text-2xl font-semibold">신용카드</h2>
         <p className="text-sm text-muted">
-          이번 달 청구액은 지난달 신용 사용 합계입니다. 결제일이 지나기 전에는 통장에서 빠질 금액으로 계산하고, 지난 뒤에는 이미 빠진 것으로 봅니다.
+          이번 달 청구액은 지난달 신용 사용 합계입니다. 카드마다 어느 통장에서 어느 날에 빠져나가는지 지정하면, 그 통장 예상 잔액에서만 빼니다.
         </p>
       </div>
 
-      <section className="sheet grid gap-3 p-4 md:grid-cols-[1fr_120px_auto] md:items-end">
+      <section className="sheet grid gap-3 p-4 md:grid-cols-[1fr_120px_1fr_auto] md:items-end">
         <Field label="카드 이름">
           <TextInput value={name} onChange={(event) => setName(event.target.value)} placeholder="삼성카드" />
         </Field>
-        <Field label="결제일">
+        <Field label="출금일">
           <TextInput inputMode="numeric" value={paymentDay} onChange={(event) => setPaymentDay(event.target.value)} />
+        </Field>
+        <Field label="출금 통장">
+          <SelectInput value={selectedAccountId} onChange={(event) => setPaymentAccountId(event.target.value)}>
+            {ledger.snap.accounts.map((account) => (
+              <option key={account.id} value={account.id}>
+                {accountLabel(account)}
+              </option>
+            ))}
+          </SelectInput>
         </Field>
         <Button
           tone="ink"
           onClick={() => {
             const day = Number(paymentDay);
             if (!name.trim() || day < 1 || day > 31) return;
-            void ledger.addCard(name, day, "#1a4f8b");
+            void ledger.addCard(name, day, "#1a4f8b", selectedAccountId || null);
             setName("");
           }}
         >
@@ -57,7 +71,7 @@ export function CardsPage() {
           <h3 className="font-medium">알림에만 있는 카드</h3>
           <div className="mt-3 flex flex-wrap gap-2">
             {orphans.map((instrument) => (
-              <Button key={instrument} tone="ghost" onClick={() => void ledger.addCard(instrument, 14, "#1a4f8b")}>
+              <Button key={instrument} tone="ghost" onClick={() => void ledger.addCard(instrument, 14, "#1a4f8b", mainAccount(ledger.snap).id)}>
                 {instrument} 등록
               </Button>
             ))}
@@ -81,7 +95,9 @@ function CardBlock({ card, bill, pending, usage }: { card: CreditCard; bill: num
   const today = seoulParts();
   const mark = ledger.snap.cardMarks.find((item) => item.cardId === card.id && item.year === today.year && item.month === today.month);
   const [paymentDay, setPaymentDay] = useState(String(card.paymentDay));
+  const [paymentAccountId, setPaymentAccountId] = useState(card.paymentAccountId ?? "");
   const [override, setOverride] = useState(mark?.amount == null ? "" : String(mark.amount));
+  const paymentAccount = ledger.snap.accounts.find((account) => account.id === (card.paymentAccountId ?? "")) ?? ledger.snap.accounts.find((account) => account.isMain);
 
   function saveMark(paid: boolean | null, amountText = override) {
     const amount = amountText.trim() ? parseAmountInput(amountText) : null;
@@ -93,7 +109,10 @@ function CardBlock({ card, bill, pending, usage }: { card: CreditCard; bill: num
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="text-lg font-semibold">{card.name}</h3>
-          <p className="text-sm text-muted">결제일 {card.paymentDay}일 · {pending ? "이번 달 출금 예정" : "이번 달 출금은 반영된 것으로 계산"}</p>
+          <p className="text-sm text-muted">
+            {paymentAccount ? `${accountLabel(paymentAccount)}에서 ` : ""}
+            {card.paymentDay}일 출금 · {pending ? "이번 달 출금 예정" : "이번 달 출금은 반영된 것으로 계산"}
+          </p>
         </div>
         <Button tone="clay" onClick={() => void ledger.deleteCard(card.id)}>
           삭제
@@ -109,8 +128,8 @@ function CardBlock({ card, bill, pending, usage }: { card: CreditCard; bill: num
           <p className="tabular text-2xl font-semibold">{won(usage)}</p>
         </div>
       </div>
-      <div className="mt-4 grid gap-3 md:grid-cols-2">
-        <Field label="결제일">
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
+        <Field label="출금일">
           <TextInput
             inputMode="numeric"
             value={paymentDay}
@@ -120,6 +139,23 @@ function CardBlock({ card, bill, pending, usage }: { card: CreditCard; bill: num
               if (day >= 1 && day <= 31) void ledger.updateCard(card.id, { paymentDay: day });
             }}
           />
+        </Field>
+        <Field label="출금 통장">
+          <SelectInput
+            value={paymentAccountId}
+            onChange={(event) => {
+              const next = event.target.value;
+              setPaymentAccountId(next);
+              void ledger.updateCard(card.id, { paymentAccountId: next || null });
+            }}
+          >
+            <option value="">메인 통장</option>
+            {ledger.snap.accounts.map((account) => (
+              <option key={account.id} value={account.id}>
+                {accountLabel(account)}
+              </option>
+            ))}
+          </SelectInput>
         </Field>
         <Field label="청구액 직접 입력 (비우면 지난달 사용액)">
           <TextInput

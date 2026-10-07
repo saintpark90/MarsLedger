@@ -1,30 +1,34 @@
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { useLedger } from "../context/LedgerContext";
+import { cardsPaidFrom, mainAccount, resolveAccount, transactionBank } from "../lib/accounts";
 import { categoryBreakdown } from "../lib/analytics";
 import { buildForecast } from "../lib/forecast";
 import { formatKoreanDateTime, monthLabel, seoulParts, won } from "../lib/format";
 import { Button, Signed } from "../components/Ui";
+import type { LedgerSnapshot } from "../lib/types";
 
 export function Dashboard() {
   const ledger = useLedger();
   const today = seoulParts();
   const { snap } = ledger;
+  const main = mainAccount(snap);
   const forecast = useMemo(
     () =>
       buildForecast({
         today,
-        balance: snap.settings.mainBalance,
+        balance: main.balance,
         payday: snap.settings.payday,
         salaries: snap.salaries,
         recurring: snap.recurring,
         recurringMarks: snap.recurringMarks,
-        cards: snap.cards,
+        cards: cardsPaidFrom(snap.cards, main),
         cardMarks: snap.cardMarks,
         transactions: snap.transactions,
       }),
-    [snap, today],
+    [snap, today, main],
   );
+  const otherAccounts = snap.accounts.filter((account) => account.id !== main.id);
   const breakdown = categoryBreakdown(snap.transactions, snap.categories, today.year, today.month);
   const spent = breakdown.reduce((sum, row) => sum + row.amount, 0);
   const usage = forecast.cardLines.reduce((sum, card) => sum + card.usageThisMonth, 0);
@@ -38,14 +42,14 @@ export function Dashboard() {
         <p className="text-sm text-muted">{monthLabel(today.year, today.month)} 정산 후 예상 잔액</p>
         <p className="tabular mt-2 text-4xl font-semibold tracking-tight md:text-5xl">{won(forecast.expectedBalance)}</p>
         <p className="mt-2 max-w-xl text-sm leading-6 text-muted">
-          메인 통장에서 아직 빠지지 않은 자동이체와 이번 달 카드대금을 빼고, 들어오기 전인 급여를 더한 금액입니다.
+          {main.name}에서 아직 빠지지 않은 자동이체와, 이 통장에서 나가는 카드대금을 빼고, 들어오기 전인 급여를 더한 금액입니다.
         </p>
       </section>
 
       {balanceHint && snap.settings.syncBalance && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white px-4 py-3 text-sm">
           <p>
-            최근 알림 잔액은 <strong className="tabular">{won(balanceHint.amount)}</strong>입니다.
+            {main.name} 최근 알림 잔액은 <strong className="tabular">{won(balanceHint.amount)}</strong>입니다.
           </p>
           <Button
             tone="pine"
@@ -66,7 +70,7 @@ export function Dashboard() {
         <section className="sheet p-5">
           <h2 className="text-lg font-semibold">예상 잔액 계산</h2>
           <dl className="mt-4 space-y-3 text-sm">
-            <Line label="현재 메인 통장" value={forecast.balance} plain />
+            <Line label={`현재 ${main.name}`} value={forecast.balance} plain />
             <Line label="남은 자동이체" value={-forecast.recurringPendingTotal} />
             <Line label="자동이체 후" value={forecast.afterTransfers} plain />
             <Line label="남은 카드대금" value={-forecast.cardPendingTotal} />
@@ -99,6 +103,29 @@ export function Dashboard() {
             )}
             {!forecast.salaryPending && <p>급여는 이미 통장 잔액에 포함된 것으로 계산했습니다.</p>}
           </div>
+          {otherAccounts.length > 0 && (
+            <div className="mt-4 space-y-1 border-t border-line pt-3 text-sm text-muted">
+              {otherAccounts.map((account) => {
+                const side = buildForecast({
+                  today,
+                  balance: account.balance,
+                  payday: 31,
+                  salaries: [],
+                  recurring: [],
+                  recurringMarks: [],
+                  cards: cardsPaidFrom(snap.cards, account),
+                  cardMarks: snap.cardMarks,
+                  transactions: snap.transactions,
+                });
+                return (
+                  <p key={account.id}>
+                    {account.name} {won(account.balance)}
+                    {side.cardPendingTotal > 0 ? ` · 카드 출금 예정 ${won(side.cardPendingTotal)}` : ""}
+                  </p>
+                );
+              })}
+            </div>
+          )}
         </section>
 
         <div className="grid gap-5">
@@ -184,12 +211,18 @@ function Line({ label, value, plain = false }: { label: string; value: number; p
   );
 }
 
-function latestBalanceHint(snap: { settings: { mainBalance: number; balanceAsOf: string | null }; transactions: { balanceAfter: number | null; occurredAt: string }[] }) {
+function latestBalanceHint(snap: LedgerSnapshot) {
+  const main = mainAccount(snap);
   const found = [...snap.transactions]
     .filter((transaction) => transaction.balanceAfter != null)
+    .filter((transaction) => {
+      const account = resolveAccount(transaction, snap.accounts);
+      if (account) return account.id === main.id;
+      return !transactionBank(transaction);
+    })
     .sort((a, b) => +new Date(b.occurredAt) - +new Date(a.occurredAt))[0];
   if (!found || found.balanceAfter == null) return null;
-  const newer = !snap.settings.balanceAsOf || +new Date(found.occurredAt) > +new Date(snap.settings.balanceAsOf);
-  if (!newer || found.balanceAfter === snap.settings.mainBalance) return null;
+  const newer = !main.balanceAsOf || +new Date(found.occurredAt) > +new Date(main.balanceAsOf);
+  if (!newer || found.balanceAfter === main.balance) return null;
   return { amount: found.balanceAfter, at: found.occurredAt };
 }
