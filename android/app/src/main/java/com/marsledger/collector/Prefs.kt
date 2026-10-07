@@ -5,17 +5,19 @@ import android.content.Context
 class Prefs(context: Context) {
     private val prefs = context.getSharedPreferences("marsledger", Context.MODE_PRIVATE)
 
-    var url: String
-        get() = prefs.getString("url", "") ?: ""
-        set(value) = prefs.edit().putString("url", value.trim().trimEnd('/')).apply()
+    val url: String
+        get() = BuildConfig.SUPABASE_URL.trim().trimEnd('/')
 
-    var anonKey: String
-        get() = prefs.getString("anon", "") ?: ""
-        set(value) = prefs.edit().putString("anon", value.trim()).apply()
+    val anonKey: String
+        get() = BuildConfig.SUPABASE_ANON_KEY.trim()
 
     var email: String
         get() = prefs.getString("email", "") ?: ""
         set(value) = prefs.edit().putString("email", value.trim()).apply()
+
+    var password: String
+        get() = prefs.getString("password", "") ?: ""
+        set(value) = prefs.edit().putString("password", value).apply()
 
     var accessToken: String
         get() = prefs.getString("access", "") ?: ""
@@ -49,6 +51,13 @@ class Prefs(context: Context) {
         get() = accessToken.isNotBlank() && userId.isNotBlank()
 
     fun clearSession() {
-        prefs.edit().remove("access").remove("refresh").remove("expires").remove("user").remove("email").apply()
+        prefs.edit()
+            .remove("access")
+            .remove("refresh")
+            .remove("expires")
+            .remove("user")
+            .remove("email")
+            .remove("password")
+            .apply()
     }
 }

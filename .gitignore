@@ -9,6 +9,8 @@ android/app/build
 android/local.properties
 android/.idea
 *.jks
+*.apk
+android/keystore.properties
 .DS_Store
 .vercel
 .env*

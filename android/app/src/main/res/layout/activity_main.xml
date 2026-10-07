@@ -32,7 +32,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="카드·은행 알림만 읽어 내가 연결한 Supabase로 보냅니다. 다른 앱 알림은 전송하지 않습니다."
+            android:text="카드·은행 알림만 읽어 연결된 장부로 보냅니다. 이메일과 비밀번호는 한 번만 입력하면 됩니다."
             android:textColor="#6F685E"
             android:textSize="14sp" />
 
@@ -47,26 +47,11 @@
             android:textSize="14sp" />
 
         <EditText
-            android:id="@+id/urlInput"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:hint="https://프로젝트.supabase.co"
-            android:inputType="textUri"
-            android:importantForAutofill="no" />
-
-        <EditText
-            android:id="@+id/keyInput"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="anon public 키"
-            android:inputType="textPassword"
-            android:importantForAutofill="no" />
-
-        <EditText
             android:id="@+id/emailInput"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:autofillHints="emailAddress"
             android:hint="이메일"
             android:inputType="textEmailAddress" />
 
@@ -74,10 +59,12 @@
             android:id="@+id/passwordInput"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:autofillHints="password"
             android:hint="비밀번호"
             android:inputType="textPassword" />
 
         <LinearLayout
+            android:id="@+id/authRow"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"

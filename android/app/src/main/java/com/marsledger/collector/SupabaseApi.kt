@@ -20,6 +20,7 @@ class SupabaseApi(private val prefs: Prefs) {
             throw IllegalStateException(authMessage(payload, code))
         }
         saveSession(payload, email)
+        prefs.password = password
     }
 
     fun signUp(email: String, password: String): Boolean {
@@ -27,6 +28,7 @@ class SupabaseApi(private val prefs: Prefs) {
         val (code, payload) = auth("/auth/v1/signup", body)
         if (payload.has("access_token")) {
             saveSession(payload, email)
+            prefs.password = password
             return true
         }
         if (code in 200..299) return false
@@ -108,13 +110,26 @@ class SupabaseApi(private val prefs: Prefs) {
         return message.ifBlank { "인증 실패 ($code)" }
     }
 
+    fun ensureSession() {
+        ensureAuth()
+    }
+
     private fun ensureAuth() {
-        if (prefs.accessToken.isBlank()) throw IllegalStateException("로그인이 필요합니다.")
-        if (System.currentTimeMillis() < prefs.expiresAt) return
-        if (prefs.refreshToken.isBlank()) throw IllegalStateException("다시 로그인해 주세요.")
+        if (prefs.accessToken.isNotBlank() && prefs.userId.isNotBlank() && System.currentTimeMillis() < prefs.expiresAt) return
+        if (refreshSession()) return
+        if (prefs.email.isNotBlank() && prefs.password.isNotBlank()) {
+            signIn(prefs.email, prefs.password)
+            return
+        }
+        throw IllegalStateException("로그인이 필요합니다.")
+    }
+
+    private fun refreshSession(): Boolean {
+        if (prefs.refreshToken.isBlank()) return false
         val (_, payload) = auth("/auth/v1/token?grant_type=refresh_token", JSONObject().put("refresh_token", prefs.refreshToken))
-        if (!payload.has("access_token")) throw IllegalStateException("다시 로그인해 주세요.")
+        if (!payload.has("access_token")) return false
         saveSession(payload, prefs.email)
+        return true
     }
 
     private fun get(query: String): JSONArray {
