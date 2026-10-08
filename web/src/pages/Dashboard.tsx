@@ -46,7 +46,7 @@ export function Dashboard() {
         <p className="text-sm text-muted">{monthLabel(today.year, today.month)} 정산 후 남는 돈</p>
         <p className="tabular mt-2 text-4xl font-semibold tracking-tight md:text-5xl">{won(expectedTotal)}</p>
         <p className="mt-2 max-w-xl text-sm leading-6 text-muted">
-          지금 통장 잔액에 아직 들어오지 않은 급여를 더하고, 이번 달에 빠지는 자동이체와 카드대금만 뺀 금액입니다. 다음 달에 빠지는 카드값은 통장 아래에 출금일만 적어 두고 이번 계산에는 넣지 않습니다.
+          지금 통장 잔액에 아직 들어오지 않은 급여를 더하고, 이번 달에 빠지는 자동이체와 카드대금을 뺀 금액입니다. 출금일이 다음 달이어도 이미 쓴 카드값은 여기서 뺍니다.
         </p>
       </section>
 
@@ -144,7 +144,7 @@ function AccountForecast({
   isMain: boolean;
   forecast: Forecast;
 }) {
-  const upcoming = forecast.cardLines.filter((card) => card.upcoming && card.usageThisMonth !== 0);
+  const spentAhead = forecast.cardLines.filter((card) => card.upcoming && card.usageThisMonth !== 0);
   const bills = forecast.cardLines.filter((card) => card.pending && card.billAmount !== 0);
   return (
     <section className="sheet p-5 md:p-7">
@@ -192,23 +192,23 @@ function AccountForecast({
             value={-card.billAmount}
           />
         ))}
+        {spentAhead.map((card) => (
+          <Line
+            key={`${card.id}-open`}
+            label={
+              <span className="inline-flex items-center gap-2">
+                <CardThumb name={card.name} color={card.color} size="sm" />
+                {card.name} · {formatKoreanYmd(card.openPayment)} 출금 · 이미 쓴 금액
+              </span>
+            }
+            value={-card.usageThisMonth}
+          />
+        ))}
         <div className="flex items-center justify-between border-t border-line pt-3 text-base font-semibold">
           <dt>남는 돈</dt>
           <dd className="tabular">{won(forecast.expectedBalance)}</dd>
         </div>
       </dl>
-      {upcoming.length > 0 && (
-        <div className="mt-4 space-y-2 text-sm text-muted">
-          {upcoming.map((card) => (
-            <p key={card.id} className="flex items-center gap-2">
-              <CardThumb name={card.name} color={card.color} size="sm" />
-              <span>
-                {card.name} {won(card.usageThisMonth)}은 {formatKoreanYmd(card.openPayment)}에 나갑니다. 이번 달 남는 돈에서는 빼지 않습니다.
-              </span>
-            </p>
-          ))}
-        </div>
-      )}
     </section>
   );
 }

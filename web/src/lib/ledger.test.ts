@@ -182,10 +182,11 @@ describe("buildForecast", () => {
       usageThisMonth: 40_000,
     });
     expect(forecast.cardLines.find((card) => card.name === "현대카드")?.pending).toBe(false);
-    expect(forecast.cardPendingTotal).toBe(420_000);
+    expect(forecast.cardLines.find((card) => card.name === "삼성카드")?.upcoming).toBe(true);
+    expect(forecast.cardPendingTotal).toBe(460_000);
     expect(forecast.afterTransfers).toBe(1_931_000);
-    expect(forecast.afterCards).toBe(1_511_000);
-    expect(forecast.expectedBalance).toBe(4_711_000);
+    expect(forecast.afterCards).toBe(1_471_000);
+    expect(forecast.expectedBalance).toBe(4_671_000);
   });
 
   it("does not add salary that is already marked received", () => {
@@ -264,8 +265,8 @@ describe("buildForecast", () => {
       usageThisMonth: 120_000,
       upcoming: true,
     });
-    expect(forecast.cardPendingTotal).toBe(80_000);
-    expect(forecast.expectedBalance).toBe(920_000);
+    expect(forecast.cardPendingTotal).toBe(200_000);
+    expect(forecast.expectedBalance).toBe(800_000);
   });
 
   it("adds each unpaid salary day and skips a day that already passed", () => {

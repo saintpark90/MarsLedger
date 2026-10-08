@@ -107,7 +107,11 @@ export function buildForecast(input: {
       upcoming,
     };
   });
-  const cardPendingTotal = cardLines.filter((line) => line.pending).reduce((sum, line) => sum + line.billAmount, 0);
+  const cardPendingTotal = cardLines.reduce((sum, line) => {
+    const dueThisMonth = line.pending ? line.billAmount : 0;
+    const spentAhead = line.upcoming ? line.usageThisMonth : 0;
+    return sum + dueThisMonth + spentAhead;
+  }, 0);
   const afterTransfers = balance - recurringPendingTotal;
   const afterCards = afterTransfers - cardPendingTotal;
   const expectedBalance = afterCards + (salaryPending ? salaryAmount : 0);
