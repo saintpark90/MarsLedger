@@ -1,5 +1,6 @@
 import { createId } from "./defaults";
 import { last4FromText } from "./parseNotification";
+import { defaultCardCycle } from "./cardCycle";
 import type { BankAccount, CreditCard, LedgerSnapshot, Recurring, Settings, Transaction } from "./types";
 
 const BANKS: { name: string; test: (compact: string) => boolean }[] = [
@@ -137,7 +138,7 @@ export function normalizeSnapshot(snap: LedgerSnapshot): LedgerSnapshot {
   return {
     ...snap,
     accounts,
-    cards: snap.cards.map((card) => ({ ...card, paymentAccountId: card.paymentAccountId ?? null })),
+    cards: snap.cards.map(normalizeCard),
     recurring: (snap.recurring ?? []).map((item) => ({ ...item, accountId: item.accountId ?? null })),
     transactions: snap.transactions.map(normalizeTransaction),
     settings: {
@@ -151,6 +152,19 @@ export function normalizeSnapshot(snap: LedgerSnapshot): LedgerSnapshot {
 function ensureOneMain(accounts: BankAccount[]): BankAccount[] {
   const main = accounts.find((account) => account.isMain) ?? accounts[0];
   return accounts.map((account) => ({ ...account, isMain: account.id === main.id }));
+}
+
+function normalizeCard(card: CreditCard): CreditCard {
+  return {
+    ...defaultCardCycle,
+    ...card,
+    paymentAccountId: card.paymentAccountId ?? null,
+    periodStartOffset: card.periodStartOffset ?? defaultCardCycle.periodStartOffset,
+    periodStartDay: card.periodStartDay ?? defaultCardCycle.periodStartDay,
+    periodEndOffset: card.periodEndOffset ?? defaultCardCycle.periodEndOffset,
+    periodEndDay: card.periodEndDay ?? defaultCardCycle.periodEndDay,
+    paymentOffset: card.paymentOffset ?? defaultCardCycle.paymentOffset,
+  };
 }
 
 function normalizeAccount(account: BankAccount): BankAccount {

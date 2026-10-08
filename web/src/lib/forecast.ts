@@ -1,4 +1,5 @@
-import { clampDay, inMonth, previousMonth } from "./format";
+import { compareYmd, cycleForDate, cyclePayingIn, usageBetween } from "./cardCycle";
+import { clampDay, previousMonth } from "./format";
 import type { CardMark, CreditCard, Recurring, RecurringMark, Salary, Transaction, YMD } from "./types";
 
 export type Forecast = {
@@ -15,32 +16,20 @@ export type Forecast = {
     name: string;
     color: string;
     paymentDay: number;
+    paymentMonth: number;
+    paymentYear: number;
     billAmount: number;
     pending: boolean;
     usageThisMonth: number;
+    openStart: YMD;
+    openEnd: YMD;
+    openPayment: YMD;
+    upcoming: boolean;
   }[];
   cardPendingTotal: number;
   afterCards: number;
   expectedBalance: number;
 };
-
-function cardMatches(transaction: Transaction, card: CreditCard): boolean {
-  if (transaction.cardId === card.id) return true;
-  if (transaction.cardId) return false;
-  if (!transaction.instrument) return false;
-  const instrument = transaction.instrument.replace(/\s+/g, "");
-  const name = card.name.replace(/\s+/g, "");
-  return instrument.includes(name) || name.includes(instrument);
-}
-
-function creditEffect(transaction: Transaction, card: CreditCard, year: number, month: number): number {
-  if (transaction.excluded || transaction.method !== "credit") return 0;
-  if (!cardMatches(transaction, card)) return 0;
-  if (!inMonth(transaction.occurredAt, year, month)) return 0;
-  if (transaction.direction === "expense") return transaction.amount;
-  if (transaction.direction === "refund") return -transaction.amount;
-  return 0;
-}
 
 export function buildForecast(input: {
   today: YMD;
@@ -80,24 +69,27 @@ export function buildForecast(input: {
   const recurringPendingTotal = recurringPending.reduce((sum, item) => sum + item.amount, 0);
 
   const cardLines = cards.map((card) => {
+    const paying = cyclePayingIn(card, today.year, today.month);
+    const open = cycleForDate(card, today) ?? paying;
     const mark = cardMarks.find((entry) => entry.cardId === card.id && entry.year === today.year && entry.month === today.month);
-    const billAmount =
-      mark?.amount != null
-        ? mark.amount
-        : transactions.reduce((sum, transaction) => sum + creditEffect(transaction, card, prev.year, prev.month), 0);
-    const pending = mark?.paid != null ? !mark.paid : today.day <= clampDay(today.year, today.month, card.paymentDay);
-    const usageThisMonth = transactions.reduce(
-      (sum, transaction) => sum + creditEffect(transaction, card, today.year, today.month),
-      0,
-    );
+    const billAmount = mark?.amount != null ? mark.amount : usageBetween(card, transactions, paying.start, paying.end);
+    const pending = mark?.paid != null ? !mark.paid : compareYmd(today, paying.payment) <= 0;
+    const usageThisMonth = usageBetween(card, transactions, open.start, open.end);
+    const upcoming = compareYmd(open.payment, paying.payment) > 0 && compareYmd(today, open.payment) <= 0;
     return {
       id: card.id,
       name: card.name,
       color: card.color,
-      paymentDay: card.paymentDay,
+      paymentDay: paying.payment.day,
+      paymentMonth: paying.payment.month,
+      paymentYear: paying.payment.year,
       billAmount,
       pending,
       usageThisMonth,
+      openStart: open.start,
+      openEnd: open.end,
+      openPayment: open.payment,
+      upcoming,
     };
   });
   const cardPendingTotal = cardLines.filter((line) => line.pending).reduce((sum, line) => sum + line.billAmount, 0);

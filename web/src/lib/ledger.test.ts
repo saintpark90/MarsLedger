@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import categories from "../../../shared/categories.json";
 import { recurringForAccount, resolveAccount, transactionBank } from "./accounts";
+import { cycleForDate } from "./cardCycle";
 import { categoryBreakdown } from "./analytics";
 import { resolveCategoryId } from "./classify";
 import { buildForecast } from "./forecast";
 import { clampDay } from "./format";
 import { parseNotification } from "./parseNotification";
-import type { BankAccount, Category, Rule, Transaction } from "./types";
+import type { BankAccount, Category, CreditCard, Rule, Transaction } from "./types";
 
 const catalog: Category[] = categories.map((category, index) => ({
   id: `cat-${index}`,
@@ -158,8 +159,8 @@ describe("buildForecast", () => {
       ],
       recurringMarks: [],
       cards: [
-        { id: "c1", name: "삼성카드", paymentDay: 14, color: "#111", paymentAccountId: null },
-        { id: "c2", name: "현대카드", paymentDay: 2, color: "#222", paymentAccountId: null },
+        card("c1", "삼성카드", 14),
+        card("c2", "현대카드", 2),
       ],
       cardMarks: [],
       transactions: [
@@ -223,6 +224,47 @@ describe("buildForecast", () => {
       transactions: [],
     });
     expect(forecast.recurringPending.map((item) => item.name)).toEqual(["월세"]);
+  });
+
+  it("bills a 29th-to-28th cycle on the 10th two months after it starts", () => {
+    const hyundai = card("hyundai", "현대카드", 10, {
+      periodStartDay: 29,
+      periodEndOffset: 1,
+      periodEndDay: 28,
+      paymentOffset: 2,
+    });
+    const today = { year: 2026, month: 10, day: 8 };
+    const open = cycleForDate(hyundai, today);
+    expect(open).toMatchObject({
+      start: { year: 2026, month: 9, day: 29 },
+      end: { year: 2026, month: 10, day: 28 },
+      payment: { year: 2026, month: 11, day: 10 },
+    });
+
+    const forecast = buildForecast({
+      today,
+      balance: 1_000_000,
+      payday: 25,
+      salaries: [],
+      recurring: [],
+      recurringMarks: [],
+      cards: [hyundai],
+      cardMarks: [],
+      transactions: [
+        tx("today", 120_000, "2026-10-08T03:00:00.000Z", "hyundai"),
+        tx("closed", 80_000, "2026-09-20T03:00:00.000Z", "hyundai"),
+      ],
+    });
+    expect(forecast.cardLines[0]).toMatchObject({
+      billAmount: 80_000,
+      pending: true,
+      paymentMonth: 10,
+      paymentDay: 10,
+      usageThisMonth: 120_000,
+      upcoming: true,
+    });
+    expect(forecast.cardPendingTotal).toBe(80_000);
+    expect(forecast.expectedBalance).toBe(920_000);
   });
 });
 
@@ -302,6 +344,22 @@ describe("analytics", () => {
     expect(rows).toEqual([{ categoryId: "food", name: "식비", color: "#c4533a", amount: 25_000 }]);
   });
 });
+
+function card(id: string, name: string, paymentDay: number, extra: Partial<CreditCard> = {}): CreditCard {
+  return {
+    id,
+    name,
+    paymentDay,
+    color: "#111",
+    paymentAccountId: null,
+    periodStartOffset: 0,
+    periodStartDay: 1,
+    periodEndOffset: 0,
+    periodEndDay: 31,
+    paymentOffset: 1,
+    ...extra,
+  };
+}
 
 function bank(id: string, bankName: string, last4: string, isMain: boolean): BankAccount {
   return {

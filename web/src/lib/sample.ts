@@ -62,8 +62,30 @@ export function buildSample(base: LedgerSnapshot, today: YMD): LedgerSnapshot {
     isMain: true,
     createdAt: new Date().toISOString(),
   };
-  const samsung: CreditCard = { id: createId(), name: "삼성카드", paymentDay: 14, color: "#1a4f8b", paymentAccountId: kakao.id };
-  const hyundai: CreditCard = { id: createId(), name: "현대카드", paymentDay: 2, color: "#222222", paymentAccountId: kakao.id };
+  const samsung: CreditCard = {
+    id: createId(),
+    name: "삼성카드",
+    paymentDay: 14,
+    color: "#1a4f8b",
+    paymentAccountId: kakao.id,
+    periodStartOffset: 0,
+    periodStartDay: 1,
+    periodEndOffset: 0,
+    periodEndDay: 31,
+    paymentOffset: 1,
+  };
+  const hyundai: CreditCard = {
+    id: createId(),
+    name: "현대카드",
+    paymentDay: 10,
+    color: "#222222",
+    paymentAccountId: kakao.id,
+    periodStartOffset: 0,
+    periodStartDay: 29,
+    periodEndOffset: 1,
+    periodEndDay: 28,
+    paymentOffset: 2,
+  };
   const recurring: Recurring[] = [
     { id: createId(), name: "월세", amount: 500_000, dayOfMonth: 10, categoryId: housing, accountId: kakao.id, enabled: true },
     { id: createId(), name: "보험", amount: 85_000, dayOfMonth: 3, categoryId: finance, accountId: kakao.id, enabled: true },

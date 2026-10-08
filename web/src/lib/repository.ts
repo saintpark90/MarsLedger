@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { bankFromPackage, defaultAccount, normalizeSnapshot } from "./accounts";
+import { defaultCardCycle } from "./cardCycle";
 import { explainError, readConnection } from "./connection";
 import { buildDefaultCatalog, catalogAdditions } from "./defaults";
 import { last4FromText } from "./parseNotification";
@@ -278,8 +279,13 @@ export async function saveCard(card: CreditCard): Promise<void> {
     payment_day: card.paymentDay,
     color: card.color,
     payment_account_id: card.paymentAccountId,
+    period_start_offset: card.periodStartOffset,
+    period_start_day: card.periodStartDay,
+    period_end_offset: card.periodEndOffset,
+    period_end_day: card.periodEndDay,
+    payment_offset: card.paymentOffset,
   });
-  if (error) throw new Error(explainError(error));
+  if (error) throw new Error(cardCycleError(error));
 }
 
 export async function saveAccount(account: BankAccount): Promise<void> {
@@ -504,14 +510,33 @@ function mapTransaction(row: Row): Transaction {
   };
 }
 
+function cardCycleError(error: { message?: string; code?: string }): string {
+  const message = `${error.message ?? ""} ${error.code ?? ""}`;
+  if (/period_start_offset|period_end_offset|payment_offset|schema cache|PGRST204/i.test(message)) {
+    return "카드 이용기간을 쓰려면 Supabase SQL Editor에서 supabase/migrations/20261008000000_card_cycle.sql 을 실행해 주세요.";
+  }
+  return explainError(error);
+}
+
 function mapCard(row: Row): CreditCard {
   return {
+    ...defaultCardCycle,
     id: String(row.id),
     name: String(row.name),
     paymentDay: Number(row.payment_day),
     color: String(row.color ?? "#1e6a45"),
     paymentAccountId: (row.payment_account_id as string | null) ?? null,
+    periodStartOffset: finiteNumber(row.period_start_offset, defaultCardCycle.periodStartOffset),
+    periodStartDay: finiteNumber(row.period_start_day, defaultCardCycle.periodStartDay),
+    periodEndOffset: finiteNumber(row.period_end_offset, defaultCardCycle.periodEndOffset),
+    periodEndDay: finiteNumber(row.period_end_day, defaultCardCycle.periodEndDay),
+    paymentOffset: finiteNumber(row.payment_offset, defaultCardCycle.paymentOffset),
   };
+}
+
+function finiteNumber(value: unknown, fallback: number): number {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
 }
 
 function mapAccount(row: Row): BankAccount {

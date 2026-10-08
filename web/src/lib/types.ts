@@ -64,6 +64,11 @@ export type CreditCard = {
   paymentDay: number;
   color: string;
   paymentAccountId: string | null;
+  periodStartOffset: number;
+  periodStartDay: number;
+  periodEndOffset: number;
+  periodEndDay: number;
+  paymentOffset: number;
 };
 
 export type Recurring = {

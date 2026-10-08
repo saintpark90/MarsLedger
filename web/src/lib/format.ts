@@ -68,6 +68,10 @@ export function monthLabel(year: number, month: number): string {
   return `${year}년 ${month}월`;
 }
 
+export function formatKoreanYmd(date: YMD): string {
+  return `${date.month}월 ${date.day}일`;
+}
+
 export function seoulDateKey(iso: string): string {
   const parts = seoulParts(new Date(iso));
   return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;

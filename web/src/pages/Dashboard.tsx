@@ -4,9 +4,9 @@ import { useLedger } from "../context/LedgerContext";
 import { cardsPaidFrom, mainAccount, recurringForAccount, resolveAccount, transactionBank } from "../lib/accounts";
 import { categoryBreakdown } from "../lib/analytics";
 import { buildForecast } from "../lib/forecast";
-import { formatKoreanDateTime, monthLabel, recurringDayText, seoulParts, won } from "../lib/format";
+import { formatKoreanDateTime, formatKoreanYmd, monthLabel, recurringDayText, seoulParts, won } from "../lib/format";
 import { Button, Signed } from "../components/Ui";
-import type { LedgerSnapshot } from "../lib/types";
+import type { LedgerSnapshot, YMD } from "../lib/types";
 
 export function Dashboard() {
   const ledger = useLedger();
@@ -28,10 +28,25 @@ export function Dashboard() {
       }),
     [snap, today, main],
   );
-  const otherAccounts = snap.accounts.filter((account) => account.id !== main.id);
+  const allCards = useMemo(
+    () =>
+      buildForecast({
+        today,
+        balance: 0,
+        payday: snap.settings.payday,
+        salaries: [],
+        recurring: [],
+        recurringMarks: [],
+        cards: snap.cards,
+        cardMarks: snap.cardMarks,
+        transactions: snap.transactions,
+      }),
+    [snap, today],
+  );
   const breakdown = categoryBreakdown(snap.transactions, snap.categories, today.year, today.month);
   const spent = breakdown.reduce((sum, row) => sum + row.amount, 0);
-  const usage = forecast.cardLines.reduce((sum, card) => sum + card.usageThisMonth, 0);
+  const allCardLines = allCards.cardLines;
+  const usage = allCardLines.reduce((sum, card) => sum + card.usageThisMonth, 0);
   const max = breakdown[0]?.amount ?? 1;
   const recent = [...snap.transactions].sort((a, b) => +new Date(b.occurredAt) - +new Date(a.occurredAt)).slice(0, 5);
   const balanceHint = latestBalanceHint(snap);
@@ -42,9 +57,11 @@ export function Dashboard() {
         <p className="text-sm text-muted">{monthLabel(today.year, today.month)} 정산 후 예상 잔액</p>
         <p className="tabular mt-2 text-4xl font-semibold tracking-tight md:text-5xl">{won(forecast.expectedBalance)}</p>
         <p className="mt-2 max-w-xl text-sm leading-6 text-muted">
-          {main.name}에서 아직 빠지지 않은 자동이체와 카드대금을 빼고, 들어오기 전인 급여를 더한 금액입니다. 다른 통장으로 지정한 자동이체는 그 통장에서 계산합니다.
+          {main.name}에서 이번 달에 빠지는 자동이체와 카드대금만 빼고, 들어오기 전인 급여를 더한 금액입니다. 다음 달에 빠지는 카드값은 아래에 출금일과 함께 표시합니다.
         </p>
       </section>
+
+      <AccountBalances snap={snap} today={today} />
 
       {balanceHint && snap.settings.syncBalance && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white px-4 py-3 text-sm">
@@ -91,10 +108,17 @@ export function Dashboard() {
               </p>
             ))}
             {forecast.cardLines
-              .filter((card) => card.pending)
+              .filter((card) => card.pending && card.billAmount !== 0)
               .map((card) => (
                 <p key={card.id}>
-                  {card.name} 청구 · {card.paymentDay}일 · {won(card.billAmount)}
+                  {card.name} 청구 · {card.paymentMonth}월 {card.paymentDay}일 · {won(card.billAmount)}
+                </p>
+              ))}
+            {forecast.cardLines
+              .filter((card) => card.upcoming && card.usageThisMonth !== 0)
+              .map((card) => (
+                <p key={`${card.id}-next`}>
+                  {card.name} · {formatKoreanYmd(card.openStart)}~{formatKoreanYmd(card.openEnd)} · {formatKoreanYmd(card.openPayment)} 출금 · {won(card.usageThisMonth)}
                 </p>
               ))}
             {!forecast.salaryKnown && <p>급여 금액이 없습니다. 설정에서 지난달 급여를 입력하면 예상에 포함됩니다.</p>}
@@ -103,37 +127,22 @@ export function Dashboard() {
             )}
             {!forecast.salaryPending && <p>급여는 이미 통장 잔액에 포함된 것으로 계산했습니다.</p>}
           </div>
-          {otherAccounts.length > 0 && (
-            <div className="mt-4 space-y-1 border-t border-line pt-3 text-sm text-muted">
-              {otherAccounts.map((account) => {
-                const side = buildForecast({
-                  today,
-                  balance: account.balance,
-                  payday: 31,
-                  salaries: [],
-                  recurring: recurringForAccount(snap.recurring, account, snap.accounts),
-                  recurringMarks: [],
-                  cards: cardsPaidFrom(snap.cards, account),
-                  cardMarks: snap.cardMarks,
-                  transactions: snap.transactions,
-                });
-                return (
-                  <p key={account.id}>
-                    {account.name} {won(account.balance)}
-                    {side.recurringPendingTotal > 0 ? ` · 자동이체 예정 ${won(side.recurringPendingTotal)}` : ""}
-                    {side.cardPendingTotal > 0 ? ` · 카드 출금 예정 ${won(side.cardPendingTotal)}` : ""}
-                  </p>
-                );
-              })}
-            </div>
-          )}
         </section>
 
         <div className="grid gap-5">
           <section className="sheet p-5">
             <p className="text-sm text-muted">현재 신용카드 사용액</p>
             <p className="tabular mt-1 text-3xl font-semibold">{won(usage)}</p>
-            <p className="mt-1 text-sm text-muted">이번 달 승인분입니다. 다음 결제 대금의 기준이 됩니다.</p>
+            <p className="mt-1 text-sm text-muted">지금 이용기간에 쌓인 금액입니다. 출금일은 카드마다 다릅니다.</p>
+            <div className="mt-3 space-y-1 text-sm text-muted">
+              {allCardLines
+                .filter((card) => card.usageThisMonth !== 0 || (card.pending && card.billAmount !== 0))
+                .map((card) => (
+                  <p key={card.id}>
+                    {card.name} · {formatKoreanYmd(card.openStart)}~{formatKoreanYmd(card.openEnd)} · {formatKoreanYmd(card.openPayment)} 출금 · {won(card.usageThisMonth)}
+                  </p>
+                ))}
+            </div>
             <Link to="/cards" className="mt-3 inline-block text-sm text-pine">
               카드 결제 관리
             </Link>
@@ -198,6 +207,52 @@ export function Dashboard() {
         </ul>
       </section>
     </div>
+  );
+}
+
+function AccountBalances({ snap, today }: { snap: LedgerSnapshot; today: YMD }) {
+  const rows = snap.accounts.map((account) => {
+    const view = buildForecast({
+      today,
+      balance: account.balance,
+      payday: account.isMain ? snap.settings.payday : 31,
+      salaries: account.isMain ? snap.salaries : [],
+      recurring: recurringForAccount(snap.recurring, account, snap.accounts),
+      recurringMarks: snap.recurringMarks,
+      cards: cardsPaidFrom(snap.cards, account),
+      cardMarks: snap.cardMarks,
+      transactions: snap.transactions,
+    });
+    return { account, expected: view.expectedBalance };
+  });
+  const total = rows.reduce((sum, row) => sum + row.account.balance, 0);
+  const expectedTotal = rows.reduce((sum, row) => sum + row.expected, 0);
+
+  return (
+    <section className="sheet p-5 md:p-7">
+      <h2 className="text-lg font-semibold">통장 잔액</h2>
+      <ul className="mt-2 divide-y divide-line">
+        {rows.map(({ account, expected }) => (
+          <li key={account.id} className="flex items-end justify-between gap-4 py-4">
+            <div>
+              <p className="text-base font-medium">
+                {account.name}
+                {account.isMain ? " · 메인" : ""}
+              </p>
+              <p className="text-sm text-muted">정산 후 {won(expected)}</p>
+            </div>
+            <p className="tabular text-2xl font-semibold md:text-3xl">{won(account.balance)}</p>
+          </li>
+        ))}
+      </ul>
+      <div className="flex items-end justify-between gap-4 border-t border-line pt-4">
+        <div>
+          <p className="text-base font-semibold">합계</p>
+          <p className="text-sm text-muted">정산 후 {won(expectedTotal)}</p>
+        </div>
+        <p className="tabular text-3xl font-semibold">{won(total)}</p>
+      </div>
+    </section>
   );
 }
 

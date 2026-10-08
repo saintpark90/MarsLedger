@@ -104,7 +104,7 @@ type LedgerController = {
   updateRecurring: (id: string, patch: Partial<Recurring>) => Promise<boolean>;
   deleteRecurring: (id: string) => Promise<boolean>;
   setRecurringSettled: (id: string, year: number, month: number, settled: boolean | null) => Promise<boolean>;
-  addCard: (name: string, paymentDay: number, color: string, paymentAccountId?: string | null) => Promise<boolean>;
+  addCard: (input: Omit<CreditCard, "id">) => Promise<boolean>;
   updateCard: (id: string, patch: Partial<CreditCard>) => Promise<boolean>;
   deleteCard: (id: string) => Promise<boolean>;
   setCardMark: (mark: CardMark) => Promise<boolean>;
@@ -468,8 +468,8 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
           else await saveRecurringMark({ recurringId: id, year, month, settled });
         });
       },
-      addCard: (name, paymentDay, color, paymentAccountId = null) => {
-        const card: CreditCard = { id: createId(), name: name.trim(), paymentDay, color, paymentAccountId };
+      addCard: (input) => {
+        const card: CreditCard = { ...input, id: createId(), name: input.name.trim() };
         const transactions = snap.transactions.map((transaction) =>
           !transaction.cardId && instrumentMatches(transaction.instrument, card.name)
             ? { ...transaction, cardId: card.id }
