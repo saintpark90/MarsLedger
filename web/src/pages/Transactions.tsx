@@ -5,6 +5,7 @@ import { parseNotification } from "../lib/parseNotification";
 import { formatKoreanDate, monthLabel, parseAmountInput, seoulDateKey, seoulParts, won } from "../lib/format";
 import { monthOptions } from "../lib/analytics";
 import type { BankAccount, Direction, PayMethod, Transaction } from "../lib/types";
+import { StatementImport } from "../components/StatementImport";
 import { AccountField, LedgerThumb } from "../components/Thumbs";
 import { Button, Field, SelectInput, TextInput } from "../components/Ui";
 
@@ -99,7 +100,7 @@ export function TransactionsPage() {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2 className="text-2xl font-semibold">내역</h2>
-          <p className="text-sm text-muted">휴대폰 알림과 직접 입력이 같은 장부에 모입니다.</p>
+          <p className="text-sm text-muted">휴대폰 알림, 직접 입력, 카드 명세서가 같은 장부에 모입니다.</p>
         </div>
         <SelectInput className="w-auto" value={month} onChange={(event) => setMonth(event.target.value)}>
           <option value="all">전체 기간</option>
@@ -130,6 +131,16 @@ export function TransactionsPage() {
         </div>
         {showManual && <ManualForm onClose={() => setShowManual(false)} />}
       </section>
+
+      <StatementImport
+        onImported={(months) => {
+          if (month === "all") return;
+          const [year, monthNumber] = month.split("-").map(Number);
+          const current = `${year}-${String(monthNumber).padStart(2, "0")}`;
+          if (months.every((item) => item === current)) return;
+          setMonth("all");
+        }}
+      />
 
       {[...groups.entries()].map(([day, rows]) => (
         <section key={day}>

@@ -93,6 +93,7 @@ type LedgerController = {
   saveSalary: (year: number, month: number, amount: number, received: boolean, day?: number) => Promise<boolean>;
   clearSalary: (year: number, month: number, day?: number) => Promise<boolean>;
   addTransaction: (input: NewTransaction) => Promise<boolean>;
+  importTransactions: (inputs: NewTransaction[]) => Promise<boolean>;
   updateTransaction: (id: string, patch: Partial<Transaction>) => Promise<boolean>;
   deleteTransaction: (id: string) => Promise<boolean>;
   addCategory: (name: string, kind: Category["kind"], color: string) => Promise<boolean>;
@@ -353,37 +354,20 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
           () => deleteSalary(year, month, day),
         ),
       addTransaction: (input) => {
-        const resolved =
-          input.categoryId !== undefined
-            ? { categoryId: input.categoryId, autoCategorized: input.autoCategorized ?? input.categoryId === null }
-            : resolveCategoryId(input.merchant, input.direction, snap.categories, snap.rules);
-        const draft: Transaction = {
-          id: createId(),
-          amount: input.amount,
-          merchant: input.merchant,
-          rawText: input.rawText ?? null,
-          direction: input.direction,
-          method: input.method,
-          instrument: input.instrument ?? null,
-          cardId: input.cardId ?? matchCard(snap, input.instrument ?? null),
-          categoryId: resolved.categoryId,
-          source: input.source,
-          notificationKey: input.notificationKey ?? null,
-          packageName: input.packageName ?? null,
-          appLabel: input.appLabel ?? null,
-          accountLast4: input.accountLast4 ?? null,
-          accountId: null,
-          balanceAfter: input.balanceAfter ?? null,
-          occurredAt: input.occurredAt,
-          excluded: false,
-          autoCategorized: input.autoCategorized ?? resolved.autoCategorized,
-          createdAt: new Date().toISOString(),
-        };
-        const transaction: Transaction = {
-          ...draft,
-          accountId: input.accountId !== undefined ? input.accountId : (resolveAccount(draft, snap.accounts)?.id ?? null),
-        };
+        const transaction = buildTransaction(snap, input);
         return commit({ ...snap, transactions: [transaction, ...snap.transactions] }, () => saveTransaction(transaction));
+      },
+      importTransactions: async (inputs) => {
+        const created = inputs
+          .map((input) => buildTransaction(snap, input))
+          .sort((left, right) => +new Date(right.occurredAt) - +new Date(left.occurredAt));
+        if (created.length === 0) return false;
+        const saved = await commit(
+          { ...snap, transactions: [...created, ...snap.transactions] },
+          () => saveTransactions(created),
+        );
+        if (saved) setNotice(`명세서에서 ${created.length}건을 넣었습니다.`);
+        return saved;
       },
       updateTransaction: (id, patch) => {
         const current = snap.transactions.find((transaction) => transaction.id === id);
@@ -569,6 +553,39 @@ export function useLedger(): LedgerController {
   const value = useContext(LedgerContext);
   if (!value) throw new Error("장부 화면 밖에서 데이터를 요청했습니다.");
   return value;
+}
+
+function buildTransaction(snap: LedgerSnapshot, input: NewTransaction): Transaction {
+  const resolved =
+    input.categoryId !== undefined
+      ? { categoryId: input.categoryId, autoCategorized: input.autoCategorized ?? input.categoryId === null }
+      : resolveCategoryId(input.merchant, input.direction, snap.categories, snap.rules);
+  const draft: Transaction = {
+    id: createId(),
+    amount: input.amount,
+    merchant: input.merchant,
+    rawText: input.rawText ?? null,
+    direction: input.direction,
+    method: input.method,
+    instrument: input.instrument ?? null,
+    cardId: input.cardId ?? matchCard(snap, input.instrument ?? null),
+    categoryId: resolved.categoryId,
+    source: input.source,
+    notificationKey: input.notificationKey ?? null,
+    packageName: input.packageName ?? null,
+    appLabel: input.appLabel ?? null,
+    accountLast4: input.accountLast4 ?? null,
+    accountId: null,
+    balanceAfter: input.balanceAfter ?? null,
+    occurredAt: input.occurredAt,
+    excluded: false,
+    autoCategorized: input.autoCategorized ?? resolved.autoCategorized,
+    createdAt: new Date().toISOString(),
+  };
+  return {
+    ...draft,
+    accountId: input.accountId !== undefined ? input.accountId : (resolveAccount(draft, snap.accounts)?.id ?? null),
+  };
 }
 
 function matchCard(snap: LedgerSnapshot, instrument: string | null): string | null {
