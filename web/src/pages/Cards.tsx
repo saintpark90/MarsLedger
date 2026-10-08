@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useLedger } from "../context/LedgerContext";
+import { AccountField, AccountThumb, CardThumb } from "../components/Thumbs";
 import { Button, Field, SelectInput, TextInput } from "../components/Ui";
 import { accountLabel, mainAccount } from "../lib/accounts";
 import { MONTH_OFFSETS, cycleForDate, cycleOrderValid, defaultCardCycle, offsetLabel } from "../lib/cardCycle";
@@ -44,9 +45,13 @@ export function CardsPage() {
       <section className="sheet space-y-3 p-4">
         <div className="grid gap-3 md:grid-cols-2">
           <Field label="카드 이름">
-            <TextInput value={name} onChange={(event) => setName(event.target.value)} placeholder="현대카드" />
+            <div className="flex items-center gap-2">
+              {name.trim() && <CardThumb name={name} size="sm" />}
+              <TextInput className="min-w-0 flex-1" value={name} onChange={(event) => setName(event.target.value)} placeholder="현대카드" />
+            </div>
           </Field>
           <Field label="출금 통장">
+            <AccountField accounts={ledger.snap.accounts} accountId={selectedAccountId}>
             <SelectInput value={selectedAccountId} onChange={(event) => setPaymentAccountId(event.target.value)}>
               {ledger.snap.accounts.map((account) => (
                 <option key={account.id} value={account.id}>
@@ -54,6 +59,7 @@ export function CardsPage() {
                 </option>
               ))}
             </SelectInput>
+            </AccountField>
           </Field>
         </div>
         <CycleFields
@@ -104,6 +110,7 @@ export function CardsPage() {
               <Button
                 key={instrument}
                 tone="ghost"
+                className="gap-2"
                 onClick={() =>
                   void ledger.addCard({
                     name: instrument,
@@ -114,6 +121,7 @@ export function CardsPage() {
                   })
                 }
               >
+                <CardThumb name={instrument} size="sm" />
                 {instrument} 등록
               </Button>
             ))}
@@ -172,13 +180,21 @@ function CardBlock({
   return (
     <article className="sheet p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
+        <div className="flex items-start gap-3">
+          <CardThumb name={card.name} color={card.color} />
+          <div>
           <h3 className="text-lg font-semibold">{card.name}</h3>
           <p className="text-sm text-muted">
-            {paymentAccount ? `${accountLabel(paymentAccount)} · ` : ""}
+            {paymentAccount ? (
+              <span className="mr-1 inline-flex items-center gap-1.5 align-middle">
+                <AccountThumb name={paymentAccount.name} bankName={paymentAccount.bankName} size="sm" />
+                {accountLabel(paymentAccount)} ·
+              </span>
+            ) : null}
             {offsetLabel(card.periodStartOffset)} {card.periodStartDay}일 ~ {offsetLabel(card.periodEndOffset)} {card.periodEndDay}일 사용 · {offsetLabel(card.paymentOffset)} {card.paymentDay}일 출금
           </p>
           <p className="mt-1 text-sm">{cycleSentence(card, today)}</p>
+          </div>
         </div>
         <Button tone="clay" onClick={() => void ledger.deleteCard(card.id)}>
           삭제
@@ -207,6 +223,7 @@ function CardBlock({
         {!editedValid && <p className="text-sm text-clay">이용 끝은 시작 이후이고, 출금일은 이용기간이 끝난 뒤여야 합니다.</p>}
         <div className="grid gap-3 md:grid-cols-2">
           <Field label="출금 통장">
+            <AccountField accounts={ledger.snap.accounts} accountId={paymentAccountId || mainAccount(ledger.snap).id}>
             <SelectInput
               value={paymentAccountId}
               onChange={(event) => {
@@ -222,6 +239,7 @@ function CardBlock({
                 </option>
               ))}
             </SelectInput>
+            </AccountField>
           </Field>
           <Field label="이번 달 청구액 직접 입력 (비우면 이용기간 합계)">
             <TextInput

@@ -5,6 +5,7 @@ import { accountLabel, mainAccount, unseenSignals } from "../lib/accounts";
 import { readConnection } from "../lib/connection";
 import { monthLabel, parseAmountInput, previousMonth, seoulParts, won } from "../lib/format";
 import { useInstallPrompt } from "../components/useInstall";
+import { AccountThumb } from "../components/Thumbs";
 import { Button, Field, TextInput } from "../components/Ui";
 import type { BankAccount } from "../lib/types";
 
@@ -47,8 +48,11 @@ export function SettingsPage() {
           <div className="space-y-2">
             {signals.map((signal) => (
               <div key={`${signal.bankName}-${signal.last4}`} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white px-3 py-2 text-sm">
-                <p>
-                  알림에서 <strong>{signal.bankName || "통장"}{signal.last4 ? ` ${signal.last4}` : ""}</strong>을 찾았습니다.
+                <p className="inline-flex items-center gap-2">
+                  <AccountThumb name={signal.bankName || "통장"} bankName={signal.bankName} size="sm" />
+                  <span>
+                    알림에서 <strong>{signal.bankName || "통장"}{signal.last4 ? ` ${signal.last4}` : ""}</strong>을 찾았습니다.
+                  </span>
                 </p>
                 <div className="flex flex-wrap gap-2">
                   <Button
@@ -88,7 +92,12 @@ export function SettingsPage() {
         </div>
         <div className="grid gap-3 border-t border-line pt-3 md:grid-cols-4">
           <Field label="통장 이름">
-            <TextInput value={accountName} onChange={(event) => setAccountName(event.target.value)} placeholder="생활비" />
+            <div className="flex items-center gap-2">
+              {(accountName.trim() || bankName.trim()) && (
+                <AccountThumb name={accountName || bankName} bankName={bankName} size="sm" />
+              )}
+              <TextInput className="min-w-0 flex-1" value={accountName} onChange={(event) => setAccountName(event.target.value)} placeholder="생활비" />
+            </div>
           </Field>
           <Field label="알림 앱 이름">
             <TextInput value={bankName} onChange={(event) => setBankName(event.target.value)} placeholder="카카오뱅크" />
@@ -284,9 +293,12 @@ function AccountEditor({ account, canDelete }: { account: BankAccount; canDelete
   return (
     <div className="rounded-xl border border-line p-3">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <p className="font-medium">
-          {accountLabel(account)}
-          {account.isMain ? " · 메인" : ""}
+        <p className="flex items-center gap-2 font-medium">
+          <AccountThumb name={name || account.name} bankName={bankName || account.bankName} size="sm" />
+          <span>
+            {accountLabel(account)}
+            {account.isMain ? " · 메인" : ""}
+          </span>
         </p>
         <div className="flex flex-wrap gap-2">
           {!account.isMain && (

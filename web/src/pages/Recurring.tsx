@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useLedger } from "../context/LedgerContext";
+import { AccountField, AccountThumb } from "../components/Thumbs";
 import { Button, Field, SelectInput, TextInput } from "../components/Ui";
 import { accountLabel, mainAccount } from "../lib/accounts";
 import { buildForecast } from "../lib/forecast";
@@ -50,13 +51,15 @@ export function RecurringPage() {
           <TextInput inputMode="numeric" value={day} onChange={(event) => setDay(event.target.value)} />
         </Field>
         <Field label="출금 통장">
-          <SelectInput value={selectedAccountId} onChange={(event) => setAccountId(event.target.value)}>
-            {ledger.snap.accounts.map((account) => (
-              <option key={account.id} value={account.id}>
-                {accountLabel(account)}
-              </option>
-            ))}
-          </SelectInput>
+          <AccountField accounts={ledger.snap.accounts} accountId={selectedAccountId}>
+            <SelectInput value={selectedAccountId} onChange={(event) => setAccountId(event.target.value)}>
+              {ledger.snap.accounts.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {accountLabel(account)}
+                </option>
+              ))}
+            </SelectInput>
+          </AccountField>
         </Field>
         <Field label="분류">
           <SelectInput value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>
@@ -127,7 +130,9 @@ function RecurringItem({ item, pending }: { item: Recurring; pending: boolean })
   return (
     <li className="sheet space-y-3 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
+        <div className="flex items-start gap-3">
+          <AccountThumb name={account.name} bankName={account.bankName} />
+          <div>
           <p className="font-medium">
             {item.name} · 매달 {recurringDayText(item.dayOfMonth)}
           </p>
@@ -140,6 +145,7 @@ function RecurringItem({ item, pending }: { item: Recurring; pending: boolean })
             {pending ? "이번 달 빠질 예정" : "이번 달 잔액에 반영된 것으로 계산"}
             {!item.enabled ? " · 꺼짐" : ""}
           </p>
+          </div>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button tone="ghost" onClick={beginEdit}>
@@ -174,13 +180,15 @@ function RecurringItem({ item, pending }: { item: Recurring; pending: boolean })
             <TextInput inputMode="numeric" value={day} onChange={(event) => setDay(event.target.value)} />
           </Field>
           <Field label="출금 통장">
-            <SelectInput value={accountId} onChange={(event) => setAccountId(event.target.value)}>
-              {ledger.snap.accounts.map((entry) => (
-                <option key={entry.id} value={entry.id}>
-                  {accountLabel(entry)}
-                </option>
-              ))}
-            </SelectInput>
+            <AccountField accounts={ledger.snap.accounts} accountId={accountId}>
+              <SelectInput value={accountId} onChange={(event) => setAccountId(event.target.value)}>
+                {ledger.snap.accounts.map((entry) => (
+                  <option key={entry.id} value={entry.id}>
+                    {accountLabel(entry)}
+                  </option>
+                ))}
+              </SelectInput>
+            </AccountField>
           </Field>
           <Field label="분류">
             <SelectInput value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>

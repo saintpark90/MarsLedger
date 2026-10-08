@@ -5,6 +5,7 @@ import { cardsPaidFrom, mainAccount, recurringForAccount, resolveAccount, transa
 import { categoryBreakdown } from "../lib/analytics";
 import { buildForecast } from "../lib/forecast";
 import { formatKoreanDateTime, formatKoreanYmd, monthLabel, recurringDayText, seoulParts, won } from "../lib/format";
+import { AccountThumb, CardThumb, LedgerThumb } from "../components/Thumbs";
 import { Button, Signed } from "../components/Ui";
 import type { LedgerSnapshot, YMD } from "../lib/types";
 
@@ -54,7 +55,10 @@ export function Dashboard() {
   return (
     <div className="space-y-5">
       <section className="sheet border-l-8 border-l-spine p-5 md:p-7">
-        <p className="text-sm text-muted">{monthLabel(today.year, today.month)} 정산 후 예상 잔액</p>
+        <p className="flex items-center gap-2 text-sm text-muted">
+          <AccountThumb name={main.name} bankName={main.bankName} size="sm" />
+          {monthLabel(today.year, today.month)} 정산 후 예상 잔액
+        </p>
         <p className="tabular mt-2 text-4xl font-semibold tracking-tight md:text-5xl">{won(forecast.expectedBalance)}</p>
         <p className="mt-2 max-w-xl text-sm leading-6 text-muted">
           {main.name}에서 이번 달에 빠지는 자동이체와 카드대금만 빼고, 들어오기 전인 급여를 더한 금액입니다. 다음 달에 빠지는 카드값은 아래에 출금일과 함께 표시합니다.
@@ -65,8 +69,11 @@ export function Dashboard() {
 
       {balanceHint && snap.settings.syncBalance && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white px-4 py-3 text-sm">
-          <p>
-            {main.name} 최근 알림 잔액은 <strong className="tabular">{won(balanceHint.amount)}</strong>입니다.
+          <p className="flex items-center gap-2">
+            <AccountThumb name={main.name} bankName={main.bankName} size="sm" />
+            <span>
+              {main.name} 최근 알림 잔액은 <strong className="tabular">{won(balanceHint.amount)}</strong>입니다.
+            </span>
           </p>
           <Button
             tone="pine"
@@ -87,7 +94,16 @@ export function Dashboard() {
         <section className="sheet p-5">
           <h2 className="text-lg font-semibold">예상 잔액 계산</h2>
           <dl className="mt-4 space-y-3 text-sm">
-            <Line label={`현재 ${main.name}`} value={forecast.balance} plain />
+            <Line
+              label={
+                <span className="inline-flex items-center gap-2">
+                  <AccountThumb name={main.name} bankName={main.bankName} size="sm" />
+                  현재 {main.name}
+                </span>
+              }
+              value={forecast.balance}
+              plain
+            />
             <Line label="남은 자동이체" value={-forecast.recurringPendingTotal} />
             <Line label="자동이체 후" value={forecast.afterTransfers} plain />
             <Line label="남은 카드대금" value={-forecast.cardPendingTotal} />
@@ -102,23 +118,36 @@ export function Dashboard() {
             </div>
           </dl>
           <div className="mt-4 space-y-1 text-sm text-muted">
-            {forecast.recurringPending.map((item) => (
-              <p key={item.id}>
-                {item.name} · {recurringDayText(item.dayOfMonth)} · {won(item.amount)}
-              </p>
-            ))}
+            {forecast.recurringPending.map((item) => {
+              const source = snap.recurring.find((entry) => entry.id === item.id);
+              const account = snap.accounts.find((entry) => entry.id === source?.accountId) ?? main;
+              return (
+                <p key={item.id} className="flex items-center gap-2">
+                  <AccountThumb name={account.name} bankName={account.bankName} size="sm" />
+                  <span>
+                    {item.name} · {recurringDayText(item.dayOfMonth)} · {won(item.amount)}
+                  </span>
+                </p>
+              );
+            })}
             {forecast.cardLines
               .filter((card) => card.pending && card.billAmount !== 0)
               .map((card) => (
-                <p key={card.id}>
-                  {card.name} 청구 · {card.paymentMonth}월 {card.paymentDay}일 · {won(card.billAmount)}
+                <p key={card.id} className="flex items-center gap-2">
+                  <CardThumb name={card.name} color={card.color} size="sm" />
+                  <span>
+                    {card.name} 청구 · {card.paymentMonth}월 {card.paymentDay}일 · {won(card.billAmount)}
+                  </span>
                 </p>
               ))}
             {forecast.cardLines
               .filter((card) => card.upcoming && card.usageThisMonth !== 0)
               .map((card) => (
-                <p key={`${card.id}-next`}>
-                  {card.name} · {formatKoreanYmd(card.openStart)}~{formatKoreanYmd(card.openEnd)} · {formatKoreanYmd(card.openPayment)} 출금 · {won(card.usageThisMonth)}
+                <p key={`${card.id}-next`} className="flex items-center gap-2">
+                  <CardThumb name={card.name} color={card.color} size="sm" />
+                  <span>
+                    {card.name} · {formatKoreanYmd(card.openStart)}~{formatKoreanYmd(card.openEnd)} · {formatKoreanYmd(card.openPayment)} 출금 · {won(card.usageThisMonth)}
+                  </span>
                 </p>
               ))}
             {!forecast.salaryKnown && <p>급여 금액이 없습니다. 설정에서 지난달 급여를 입력하면 예상에 포함됩니다.</p>}
@@ -138,8 +167,11 @@ export function Dashboard() {
               {allCardLines
                 .filter((card) => card.usageThisMonth !== 0 || (card.pending && card.billAmount !== 0))
                 .map((card) => (
-                  <p key={card.id}>
-                    {card.name} · {formatKoreanYmd(card.openStart)}~{formatKoreanYmd(card.openEnd)} · {formatKoreanYmd(card.openPayment)} 출금 · {won(card.usageThisMonth)}
+                  <p key={card.id} className="flex items-center gap-2">
+                    <CardThumb name={card.name} color={card.color} size="sm" />
+                    <span>
+                      {card.name} · {formatKoreanYmd(card.openStart)}~{formatKoreanYmd(card.openEnd)} · {formatKoreanYmd(card.openPayment)} 출금 · {won(card.usageThisMonth)}
+                    </span>
                   </p>
                 ))}
             </div>
@@ -194,11 +226,14 @@ export function Dashboard() {
             const signed = transaction.direction === "income" ? transaction.amount : transaction.direction === "refund" ? -transaction.amount : -transaction.amount;
             return (
               <li key={transaction.id} className="flex items-center justify-between gap-3 py-3 text-sm">
-                <div>
+                <div className="flex min-w-0 items-center gap-3">
+                  <LedgerThumb transaction={transaction} accounts={snap.accounts} cards={snap.cards} />
+                  <div>
                   <p className="font-medium">{transaction.merchant}</p>
                   <p className="text-muted">
                     {formatKoreanDateTime(transaction.occurredAt)} · {category?.name ?? "미분류"}
                   </p>
+                  </div>
                 </div>
                 <Signed value={signed} />
               </li>
@@ -233,13 +268,16 @@ function AccountBalances({ snap, today }: { snap: LedgerSnapshot; today: YMD }) 
       <h2 className="text-lg font-semibold">통장 잔액</h2>
       <ul className="mt-2 divide-y divide-line">
         {rows.map(({ account, expected }) => (
-          <li key={account.id} className="flex items-end justify-between gap-4 py-4">
-            <div>
+          <li key={account.id} className="flex items-center justify-between gap-4 py-4">
+            <div className="flex items-center gap-3">
+              <AccountThumb name={account.name} bankName={account.bankName} />
+              <div>
               <p className="text-base font-medium">
                 {account.name}
                 {account.isMain ? " · 메인" : ""}
               </p>
               <p className="text-sm text-muted">정산 후 {won(expected)}</p>
+              </div>
             </div>
             <p className="tabular text-2xl font-semibold md:text-3xl">{won(account.balance)}</p>
           </li>
@@ -256,7 +294,7 @@ function AccountBalances({ snap, today }: { snap: LedgerSnapshot; today: YMD }) 
   );
 }
 
-function Line({ label, value, plain = false }: { label: string; value: number; plain?: boolean }) {
+function Line({ label, value, plain = false }: { label: React.ReactNode; value: number; plain?: boolean }) {
   return (
     <div className="flex items-center justify-between gap-3">
       <dt className="text-muted">{label}</dt>

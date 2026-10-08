@@ -5,6 +5,7 @@ import { parseNotification } from "../lib/parseNotification";
 import { formatKoreanDate, monthLabel, parseAmountInput, seoulDateKey, seoulParts, won } from "../lib/format";
 import { monthOptions } from "../lib/analytics";
 import type { BankAccount, Direction, PayMethod, Transaction } from "../lib/types";
+import { AccountField, LedgerThumb } from "../components/Thumbs";
 import { Button, Field, SelectInput, TextInput } from "../components/Ui";
 
 const methods: { value: PayMethod; label: string }[] = [
@@ -137,13 +138,16 @@ export function TransactionsPage() {
             {rows.map((transaction) => (
               <li key={transaction.id}>
                 <button className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left" onClick={() => setOpenId(openId === transaction.id ? null : transaction.id)}>
-                  <span>
+                  <span className="flex min-w-0 items-center gap-3">
+                    <LedgerThumb transaction={transaction} accounts={ledger.snap.accounts} cards={ledger.snap.cards} />
+                    <span className="min-w-0">
                     <span className="block font-medium">{transaction.merchant}</span>
                     <span className="text-sm text-muted">
                       {ledger.snap.categories.find((category) => category.id === transaction.categoryId)?.name ?? "미분류"}
                       {" · "}
                       {methods.find((method) => method.value === transaction.method)?.label}
                       {placeOf(transaction, ledger.snap.accounts) ? ` · ${placeOf(transaction, ledger.snap.accounts)}` : ""}
+                    </span>
                     </span>
                   </span>
                   <span className={`tabular font-medium ${transaction.direction === "income" ? "text-pine" : "text-ink"}`}>
@@ -229,9 +233,18 @@ function TransactionEditor({ transaction }: { transaction: Transaction }) {
   return (
     <div className="space-y-3 border-t border-line px-4 py-3">
       {transaction.rawText && <p className="text-sm text-muted">{transaction.rawText}</p>}
-      {(bank || transaction.accountLast4) && (
-        <p className="text-sm text-muted">
-          {[bank ? `알림 앱 ${bank}` : "", transaction.accountLast4 ? `통장 ${transaction.accountLast4}` : ""].filter(Boolean).join(" · ")}
+      {(bank || transaction.accountLast4 || transaction.instrument) && (
+        <p className="flex items-center gap-2 text-sm text-muted">
+          <LedgerThumb transaction={transaction} accounts={ledger.snap.accounts} cards={ledger.snap.cards} />
+          <span>
+            {[
+              transaction.instrument && (transaction.method === "credit" || transaction.method === "debit") ? transaction.instrument : "",
+              bank ? `알림 앱 ${bank}` : "",
+              transaction.accountLast4 ? `통장 ${transaction.accountLast4}` : "",
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </span>
         </p>
       )}
       <div className="grid gap-3 md:grid-cols-2">
@@ -249,14 +262,16 @@ function TransactionEditor({ transaction }: { transaction: Transaction }) {
           </SelectInput>
         </Field>
         <Field label="통장">
-          <SelectInput value={accountId} onChange={(event) => setAccountId(event.target.value)}>
-            <option value="">자동</option>
-            {ledger.snap.accounts.map((account) => (
-              <option key={account.id} value={account.id}>
-                {accountLabel(account)}
-              </option>
-            ))}
-          </SelectInput>
+          <AccountField accounts={ledger.snap.accounts} accountId={accountId || resolveAccount(transaction, ledger.snap.accounts)?.id || ""}>
+            <SelectInput value={accountId} onChange={(event) => setAccountId(event.target.value)}>
+              <option value="">자동</option>
+              {ledger.snap.accounts.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {accountLabel(account)}
+                </option>
+              ))}
+            </SelectInput>
+          </AccountField>
         </Field>
       </div>
       <div className="flex flex-wrap gap-2">

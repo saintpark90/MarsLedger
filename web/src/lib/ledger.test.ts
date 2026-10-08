@@ -6,6 +6,7 @@ import { categoryBreakdown } from "./analytics";
 import { resolveCategoryId } from "./classify";
 import { buildForecast } from "./forecast";
 import { clampDay } from "./format";
+import { accountMark, cardMark } from "./marks";
 import { parseNotification } from "./parseNotification";
 import type { BankAccount, Category, CreditCard, Rule, Transaction } from "./types";
 
@@ -318,6 +319,15 @@ describe("resolveAccount", () => {
     transaction.accountLast4 = "1234";
     transaction.method = "transfer";
     expect(resolveAccount(transaction, [kakao, otherKakao])?.id).toBe("kakao-2");
+  });
+});
+
+describe("marks", () => {
+  it("picks a short tile for known banks and cards", () => {
+    expect(accountMark("카카오뱅크").icon).toBe("/brands/kakaobank.png");
+    expect(accountMark("", "토스뱅크 1234").icon).toBe("/brands/toss.png");
+    expect(cardMark("현대카드").icon).toBe("/brands/hyundaicard.png");
+    expect(cardMark("삼성카드").icon).toBe("/brands/samsungcard.png");
   });
 });
 
