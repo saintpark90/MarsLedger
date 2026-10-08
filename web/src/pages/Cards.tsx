@@ -1,14 +1,14 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useLedger } from "../context/LedgerContext";
 import { SortableList } from "../components/Sortable";
 import { AccountField, AccountThumb, CardThumb } from "../components/Thumbs";
 import { bySort } from "../lib/order";
 import { Button, Field, SelectInput, TextInput } from "../components/Ui";
 import { accountLabel, mainAccount } from "../lib/accounts";
-import { MONTH_OFFSETS, cycleForDate, cycleOrderValid, defaultCardCycle, offsetLabel } from "../lib/cardCycle";
+import { MONTH_OFFSETS, cycleForDate, cycleOrderValid, defaultCardCycle, offsetLabel, usageRows } from "../lib/cardCycle";
 import { buildForecast } from "../lib/forecast";
-import { formatKoreanYmd, parseAmountInput, seoulParts, won } from "../lib/format";
-import type { CreditCard } from "../lib/types";
+import { formatKoreanYmd, parseAmountInput, seoulDateKey, seoulParts, won } from "../lib/format";
+import type { CreditCard, Transaction, YMD } from "../lib/types";
 
 export function CardsPage() {
   const ledger = useLedger();
@@ -164,6 +164,7 @@ function CardBlock({
   const [paymentAccountId, setPaymentAccountId] = useState(card.paymentAccountId ?? "");
   const [override, setOverride] = useState(mark?.amount == null ? "" : String(mark.amount));
   const [cycle, setCycle] = useState(cycleState(card));
+  const [usageOpen, setUsageOpen] = useState(false);
   const paymentAccount = ledger.snap.accounts.find((account) => account.id === (card.paymentAccountId ?? "")) ?? ledger.snap.accounts.find((account) => account.isMain);
   const edited = draftCard(card.name, cycle.paymentDay, {
     periodStartOffset: cycle.startOffset,
@@ -215,7 +216,14 @@ function CardBlock({
             현재 이용금액
             {line ? ` · ${formatKoreanYmd(line.openStart)}~${formatKoreanYmd(line.openEnd)}` : ""}
           </p>
-          <p className="tabular text-2xl font-semibold">{won(line?.usageThisMonth ?? 0)}</p>
+          <button
+            type="button"
+            className="tabular text-2xl font-semibold underline decoration-line underline-offset-4 hover:text-pine disabled:no-underline disabled:hover:text-ink"
+            disabled={!line}
+            onClick={() => setUsageOpen(true)}
+          >
+            {won(line?.usageThisMonth ?? 0)}
+          </button>
           <p className="text-sm text-muted">{line ? `${formatKoreanYmd(line.openPayment)} 출금` : ""}</p>
         </div>
       </div>
@@ -269,6 +277,15 @@ function CardBlock({
           이용기간 저장
         </Button>
       </div>
+      {usageOpen && line && (
+        <UsageSheet
+          card={card}
+          start={line.openStart}
+          end={line.openEnd}
+          payment={line.openPayment}
+          onClose={() => setUsageOpen(false)}
+        />
+      )}
       <div className="mt-3 flex flex-wrap gap-2">
         <Button tone={mark?.paid == null ? "ink" : "ghost"} onClick={() => saveMark(null)}>
           날짜 기준
@@ -282,6 +299,116 @@ function CardBlock({
       </div>
     </article>
   );
+}
+
+function UsageSheet({
+  card,
+  start,
+  end,
+  payment,
+  onClose,
+}: {
+  card: CreditCard;
+  start: YMD;
+  end: YMD;
+  payment: YMD;
+  onClose: () => void;
+}) {
+  const ledger = useLedger();
+  const rows = usageRows(card, ledger.snap.transactions, start, end);
+  const showInstallment = rows.some((row) => installmentOf(row));
+  const total = rows.reduce((sum, row) => sum + signedAmount(row), 0);
+
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", onKey);
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = previous;
+    };
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-end justify-center bg-ink/40 p-3 sm:items-center" onClick={onClose}>
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={`usage-sheet-${card.id}`}
+        className="flex max-h-[85vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-line bg-sheet shadow-xl"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3 border-b border-line px-4 py-3">
+          <div>
+            <h3 id={`usage-sheet-${card.id}`} className="flex items-center gap-2 text-lg font-semibold">
+              <CardThumb name={card.name} color={card.color} size="sm" />
+              {card.name}
+            </h3>
+            <p className="mt-1 text-sm text-muted">
+              {formatKoreanYmd(start)}~{formatKoreanYmd(end)} · {rows.length}건 · {formatKoreanYmd(payment)} 출금
+            </p>
+          </div>
+          <Button tone="ghost" onClick={onClose}>
+            닫기
+          </Button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto">
+          {rows.length === 0 ? (
+            <p className="px-4 py-8 text-sm text-muted">이 기간에 합산된 사용 내역이 없습니다.</p>
+          ) : (
+            <table className="w-full min-w-[720px] border-collapse text-sm">
+              <thead className="sticky top-0 bg-[#f2f2f2] text-left">
+                <tr>
+                  <th className="border border-line px-2 py-1.5 font-medium">날짜</th>
+                  <th className="border border-line px-2 py-1.5 font-medium">사용처</th>
+                  <th className="border border-line px-2 py-1.5 font-medium">구분</th>
+                  <th className="border border-line px-2 py-1.5 font-medium">카테고리</th>
+                  {showInstallment && <th className="border border-line px-2 py-1.5 font-medium">할부</th>}
+                  <th className="border border-line px-2 py-1.5 text-right font-medium">금액</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => {
+                  const amount = signedAmount(row);
+                  const category = ledger.snap.categories.find((item) => item.id === row.categoryId)?.name ?? "미분류";
+                  return (
+                    <tr key={row.id} className="odd:bg-white">
+                      <td className="border border-line px-2 py-1.5 tabular whitespace-nowrap">{seoulDateKey(row.occurredAt)}</td>
+                      <td className="border border-line px-2 py-1.5">{row.merchant}</td>
+                      <td className="border border-line px-2 py-1.5 whitespace-nowrap">{row.direction === "refund" ? "취소" : "지출"}</td>
+                      <td className="border border-line px-2 py-1.5 whitespace-nowrap">{category}</td>
+                      {showInstallment && <td className="border border-line px-2 py-1.5 tabular">{installmentOf(row)}</td>}
+                      <td className={`border border-line px-2 py-1.5 text-right tabular ${amount < 0 ? "text-pine" : ""}`}>{won(amount)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr className="bg-[#f7f4ee] font-semibold">
+                  <td className="border border-line px-2 py-1.5" colSpan={showInstallment ? 5 : 4}>
+                    합계
+                  </td>
+                  <td className="border border-line px-2 py-1.5 text-right tabular">{won(total)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function signedAmount(row: Transaction): number {
+  return row.direction === "refund" ? -row.amount : row.amount;
+}
+
+function installmentOf(row: Transaction): string {
+  const match = row.rawText?.match(/할부\s*(\d+\s*\/\s*\d+)/);
+  return match ? match[1].replace(/\s+/g, "") : "";
 }
 
 function CycleFields({

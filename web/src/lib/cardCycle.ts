@@ -81,14 +81,20 @@ function cardMatches(transaction: Transaction, card: CreditCard): boolean {
   return instrument.includes(name) || name.includes(instrument);
 }
 
+export function usageRows(card: CreditCard, transactions: Transaction[], start: YMD, end: YMD): Transaction[] {
+  return transactions
+    .filter((transaction) => {
+      if (transaction.excluded || transaction.method !== "credit") return false;
+      if (transaction.direction !== "expense" && transaction.direction !== "refund") return false;
+      if (!cardMatches(transaction, card)) return false;
+      const day = seoulParts(new Date(transaction.occurredAt));
+      return compareYmd(day, start) >= 0 && compareYmd(day, end) <= 0;
+    })
+    .sort((left, right) => +new Date(left.occurredAt) - +new Date(right.occurredAt) || left.merchant.localeCompare(right.merchant, "ko"));
+}
+
 export function usageBetween(card: CreditCard, transactions: Transaction[], start: YMD, end: YMD): number {
-  return transactions.reduce((sum, transaction) => {
-    if (transaction.excluded || transaction.method !== "credit") return sum;
-    if (!cardMatches(transaction, card)) return sum;
-    const day = seoulParts(new Date(transaction.occurredAt));
-    if (compareYmd(day, start) < 0 || compareYmd(day, end) > 0) return sum;
-    if (transaction.direction === "expense") return sum + transaction.amount;
-    if (transaction.direction === "refund") return sum - transaction.amount;
-    return sum;
+  return usageRows(card, transactions, start, end).reduce((sum, transaction) => {
+    return sum + (transaction.direction === "refund" ? -transaction.amount : transaction.amount);
   }, 0);
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import categories from "../../../shared/categories.json";
 import { recurringForAccount, resolveAccount, transactionBank } from "./accounts";
-import { cycleForDate } from "./cardCycle";
+import { cycleForDate, usageBetween, usageRows } from "./cardCycle";
 import { categoryBreakdown } from "./analytics";
 import { resolveCategoryId } from "./classify";
 import { buildForecast, recurringAmount } from "./forecast";
@@ -404,6 +404,21 @@ describe("marks", () => {
     expect(accountMark("", "토스뱅크 1234").icon).toBe("/brands/toss.png");
     expect(cardMark("현대카드").icon).toBe("/brands/hyundaicard.png");
     expect(cardMark("삼성카드").icon).toBe("/brands/samsungcard.png");
+  });
+});
+
+describe("usageRows", () => {
+  it("lists the credit rows that make up the usage total", () => {
+    const hyundai = card("card", "현대카드", 14);
+    const rows = [
+      tx("late", 500, "2026-09-01T03:00:00.000Z", "card"),
+      tx("spend", 1000, "2026-10-02T03:00:00.000Z", "card"),
+      { ...tx("refund", 300, "2026-10-03T03:00:00.000Z", "card"), direction: "refund" as const },
+      { ...tx("other", 900, "2026-10-04T03:00:00.000Z", "other"), merchant: "다른카드" },
+    ];
+    const period = { start: { year: 2026, month: 10, day: 1 }, end: { year: 2026, month: 10, day: 31 } };
+    expect(usageRows(hyundai, rows, period.start, period.end).map((item) => item.id)).toEqual(["spend", "refund"]);
+    expect(usageBetween(hyundai, rows, period.start, period.end)).toBe(700);
   });
 });
 
