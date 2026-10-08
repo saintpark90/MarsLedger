@@ -3,10 +3,11 @@ import { useLedger, type NewTransaction } from "../context/LedgerContext";
 import { accountLabel, mainAccount, resolveAccount, transactionBank } from "../lib/accounts";
 import { parseNotification } from "../lib/parseNotification";
 import { formatKoreanDate, monthLabel, parseAmountInput, seoulDateKey, seoulParts, won } from "../lib/format";
+import { planInstallment } from "../lib/installment";
 import { monthOptions } from "../lib/analytics";
-import type { BankAccount, Direction, PayMethod, Transaction } from "../lib/types";
+import type { BankAccount, CreditCard, Direction, PayMethod, Transaction } from "../lib/types";
 import { StatementImport } from "../components/StatementImport";
-import { AccountField, LedgerThumb } from "../components/Thumbs";
+import { AccountField, AccountThumb, CardThumb, LedgerThumb } from "../components/Thumbs";
 import { Button, Field, SelectInput, TextInput } from "../components/Ui";
 
 const methods: { value: PayMethod; label: string }[] = [
@@ -156,8 +157,8 @@ export function TransactionsPage() {
                     <span className="text-sm text-muted">
                       {ledger.snap.categories.find((category) => category.id === transaction.categoryId)?.name ?? "미분류"}
                       {" · "}
-                      {methods.find((method) => method.value === transaction.method)?.label}
-                      {placeOf(transaction, ledger.snap.accounts) ? ` · ${placeOf(transaction, ledger.snap.accounts)}` : ""}
+                      {sourceLabel(transaction, ledger.snap.accounts, ledger.snap.cards)}
+                      {installmentLabel(transaction) ? ` · ${installmentLabel(transaction)}` : ""}
                     </span>
                     </span>
                   </span>
@@ -182,20 +183,47 @@ function ManualForm({ onClose }: { onClose: () => void }) {
   const [amount, setAmount] = useState("");
   const [merchant, setMerchant] = useState("");
   const [direction, setDirection] = useState<Direction>("expense");
-  const [method, setMethod] = useState<PayMethod>("debit");
+  const [source, setSource] = useState("");
+  const [months, setMonths] = useState("1");
   const [when, setWhen] = useState(seoulInputValue(new Date()));
+  const picked = sourceOf(source, ledger.snap.cards, ledger.snap.accounts);
+  const card = picked?.kind === "card" ? picked.card : null;
+  const total = parseAmountInput(amount);
+  const occurredAt = new Date(`${when}:00+09:00`).toISOString();
+  const installmentMonths = card && direction === "expense" ? Number(months) : 1;
+  const plan = card && installmentMonths >= 2 ? planInstallment(card, occurredAt, total, installmentMonths) : null;
+  const invalidPlan = Boolean(card && direction === "expense" && installmentMonths >= 2 && total > 0 && !plan);
 
   async function save() {
-    const input: NewTransaction = {
-      amount: parseAmountInput(amount),
-      merchant: merchant.trim() || "직접 입력",
+    if (!picked || total <= 0 || invalidPlan) return;
+    const name = merchant.trim() || "직접 입력";
+    if (plan && card) {
+      const labels = plan.map((slice) => `${slice.statement.month}월`).join(", ");
+      const saved = await ledger.importTransactions(
+        plan.map((slice) => ({
+          amount: slice.amount,
+          merchant: name,
+          rawText: `할부 ${slice.round}/${slice.months}\n이용금액 ${total.toLocaleString("ko-KR")}원`,
+          direction,
+          method: "credit" as const,
+          instrument: card.name,
+          cardId: card.id,
+          source: "manual" as const,
+          occurredAt: slice.occurredAt,
+        })),
+        `${plan.length}개월 할부를 ${labels} 명세서에 나눴습니다.`,
+      );
+      if (saved) onClose();
+      return;
+    }
+    const saved = await ledger.addTransaction({
+      amount: total,
+      merchant: name,
       direction,
-      method,
       source: "manual",
-      occurredAt: new Date(`${when}:00+09:00`).toISOString(),
-    };
-    if (input.amount <= 0) return;
-    const saved = await ledger.addTransaction(input);
+      occurredAt,
+      ...pickedFields(picked),
+    });
     if (saved) onClose();
   }
 
@@ -214,20 +242,56 @@ function ManualForm({ onClose }: { onClose: () => void }) {
           <option value="refund">취소</option>
         </SelectInput>
       </Field>
-      <Field label="수단">
-        <SelectInput value={method} onChange={(event) => setMethod(event.target.value as PayMethod)}>
-          {methods.map((item) => (
-            <option key={item.value} value={item.value}>
-              {item.label}
-            </option>
-          ))}
-        </SelectInput>
+      <Field label="소비수단">
+        <div className="flex items-center gap-2">
+          {picked?.kind === "card" && <CardThumb name={picked.card.name} color={picked.card.color} size="sm" />}
+          {picked?.kind === "account" && <AccountThumb name={picked.account.name} bankName={picked.account.bankName} size="sm" />}
+          <SelectInput className="min-w-0 flex-1" value={source} onChange={(event) => setSource(event.target.value)}>
+            <option value="">카드 또는 계좌 선택</option>
+            {ledger.snap.cards.length > 0 && (
+              <optgroup label="카드">
+                {ledger.snap.cards.map((item) => (
+                  <option key={item.id} value={`card:${item.id}`}>
+                    {item.name}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            {ledger.snap.accounts.length > 0 && (
+              <optgroup label="계좌">
+                {ledger.snap.accounts.map((item) => (
+                  <option key={item.id} value={`account:${item.id}`}>
+                    {accountLabel(item)}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+          </SelectInput>
+        </div>
       </Field>
       <Field label="시각">
         <TextInput type="datetime-local" value={when} onChange={(event) => setWhen(event.target.value)} />
       </Field>
+      {card && direction === "expense" && (
+        <Field label="할부">
+          <SelectInput value={months} onChange={(event) => setMonths(event.target.value)}>
+            <option value="1">일시불</option>
+            {Array.from({ length: 35 }, (_, index) => index + 2).map((count) => (
+              <option key={count} value={count}>
+                {count}개월
+              </option>
+            ))}
+          </SelectInput>
+        </Field>
+      )}
+      {plan && (
+        <p className="text-sm text-muted md:col-span-2">
+          {plan.map((slice) => `${slice.statement.month}월`).join(", ")} 명세서에 {plan.map((slice) => won(slice.amount)).join(", ")}으로 나뉩니다.
+        </p>
+      )}
+      {invalidPlan && <p className="text-sm text-clay md:col-span-2">할부 개월 수는 금액(원)보다 클 수 없습니다.</p>}
       <div className="flex items-end">
-        <Button tone="pine" onClick={() => void save()}>
+        <Button tone="pine" disabled={!picked || total <= 0 || Boolean(invalidPlan)} onClick={() => void save()}>
           저장
         </Button>
       </div>
@@ -240,6 +304,7 @@ function TransactionEditor({ transaction }: { transaction: Transaction }) {
   const [merchant, setMerchant] = useState(transaction.merchant);
   const [categoryId, setCategoryId] = useState(transaction.categoryId ?? "");
   const [accountId, setAccountId] = useState(transaction.accountId ?? "");
+  const [source, setSource] = useState(initialSource(transaction));
   const bank = transactionBank(transaction);
   return (
     <div className="space-y-3 border-t border-line px-4 py-3">
@@ -272,6 +337,21 @@ function TransactionEditor({ transaction }: { transaction: Transaction }) {
             ))}
           </SelectInput>
         </Field>
+        <Field label="소비수단">
+          <SelectInput value={source} onChange={(event) => setSource(event.target.value)}>
+            <option value="">그대로</option>
+            {ledger.snap.cards.map((item) => (
+              <option key={item.id} value={`card:${item.id}`}>
+                {item.name}
+              </option>
+            ))}
+            {ledger.snap.accounts.map((item) => (
+              <option key={item.id} value={`account:${item.id}`}>
+                {accountLabel(item)}
+              </option>
+            ))}
+          </SelectInput>
+        </Field>
         <Field label="통장">
           <AccountField accounts={ledger.snap.accounts} accountId={accountId || resolveAccount(transaction, ledger.snap.accounts)?.id || ""}>
             <SelectInput value={accountId} onChange={(event) => setAccountId(event.target.value)}>
@@ -293,6 +373,7 @@ function TransactionEditor({ transaction }: { transaction: Transaction }) {
               merchant: merchant.trim() || transaction.merchant,
               categoryId: categoryId || null,
               accountId: accountId || null,
+              ...sourcePatch(source, ledger.snap.cards, ledger.snap.accounts),
             })
           }
         >
@@ -307,6 +388,52 @@ function TransactionEditor({ transaction }: { transaction: Transaction }) {
       </div>
     </div>
   );
+}
+
+function sourceLabel(transaction: Transaction, accounts: BankAccount[], cards: CreditCard[]): string {
+  const card = cards.find((item) => item.id === transaction.cardId);
+  if (card) return card.name;
+  const place = placeOf(transaction, accounts);
+  if (place) return place;
+  return methods.find((method) => method.value === transaction.method)?.label ?? "";
+}
+
+function installmentLabel(transaction: Transaction): string {
+  const match = transaction.rawText?.match(/할부\s*(\d+\s*\/\s*\d+)/);
+  return match ? `할부 ${match[1].replace(/\s+/g, "")}` : "";
+}
+
+type SpendSource = { kind: "card"; card: CreditCard } | { kind: "account"; account: BankAccount };
+
+function sourceOf(value: string, cards: CreditCard[], accounts: BankAccount[]): SpendSource | null {
+  if (value.startsWith("card:")) {
+    const card = cards.find((item) => item.id === value.slice(5));
+    return card ? { kind: "card", card } : null;
+  }
+  if (value.startsWith("account:")) {
+    const account = accounts.find((item) => item.id === value.slice(8));
+    return account ? { kind: "account", account } : null;
+  }
+  return null;
+}
+
+function pickedFields(source: SpendSource): Pick<NewTransaction, "method" | "instrument" | "cardId" | "accountId"> {
+  if (source.kind === "card") {
+    return { method: "credit", instrument: source.card.name, cardId: source.card.id, accountId: null };
+  }
+  return { method: "transfer", instrument: source.account.name, cardId: null, accountId: source.account.id };
+}
+
+function initialSource(transaction: Transaction): string {
+  if (transaction.cardId) return `card:${transaction.cardId}`;
+  if (transaction.accountId) return `account:${transaction.accountId}`;
+  return "";
+}
+
+function sourcePatch(value: string, cards: CreditCard[], accounts: BankAccount[]): Partial<Transaction> {
+  const picked = sourceOf(value, cards, accounts);
+  if (!picked) return {};
+  return pickedFields(picked);
 }
 
 function placeOf(transaction: Transaction, accounts: BankAccount[]): string {

@@ -93,7 +93,7 @@ type LedgerController = {
   saveSalary: (year: number, month: number, amount: number, received: boolean, day?: number) => Promise<boolean>;
   clearSalary: (year: number, month: number, day?: number) => Promise<boolean>;
   addTransaction: (input: NewTransaction) => Promise<boolean>;
-  importTransactions: (inputs: NewTransaction[]) => Promise<boolean>;
+  importTransactions: (inputs: NewTransaction[], notice?: string) => Promise<boolean>;
   updateTransaction: (id: string, patch: Partial<Transaction>) => Promise<boolean>;
   deleteTransaction: (id: string) => Promise<boolean>;
   addCategory: (name: string, kind: Category["kind"], color: string) => Promise<boolean>;
@@ -357,7 +357,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         const transaction = buildTransaction(snap, input);
         return commit({ ...snap, transactions: [transaction, ...snap.transactions] }, () => saveTransaction(transaction));
       },
-      importTransactions: async (inputs) => {
+      importTransactions: async (inputs, note) => {
         const created = inputs
           .map((input) => buildTransaction(snap, input))
           .sort((left, right) => +new Date(right.occurredAt) - +new Date(left.occurredAt));
@@ -366,7 +366,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
           { ...snap, transactions: [...created, ...snap.transactions] },
           () => saveTransactions(created),
         );
-        if (saved) setNotice(`명세서에서 ${created.length}건을 넣었습니다.`);
+        if (saved) setNotice(note ?? `명세서에서 ${created.length}건을 넣었습니다.`);
         return saved;
       },
       updateTransaction: (id, patch) => {
