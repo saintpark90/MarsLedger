@@ -69,6 +69,7 @@ export type CreditCard = {
   periodEndOffset: number;
   periodEndDay: number;
   paymentOffset: number;
+  sort?: number;
 };
 
 export type Recurring = {
@@ -79,12 +80,16 @@ export type Recurring = {
   categoryId: string | null;
   accountId: string | null;
   enabled: boolean;
+  sort?: number;
+  referenceMerchant?: string | null;
+  referenceTransactionId?: string | null;
 };
 
 export type Salary = {
   id: string;
   year: number;
   month: number;
+  day?: number;
   amount: number;
   received: boolean;
 };
@@ -93,7 +98,8 @@ export type RecurringMark = {
   recurringId: string;
   year: number;
   month: number;
-  settled: boolean;
+  settled: boolean | null;
+  amount?: number | null;
 };
 
 export type CardMark = {

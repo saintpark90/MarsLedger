@@ -90,8 +90,8 @@ type LedgerController = {
   addAccount: (input: { name: string; bankName: string; last4: string; balance: number; isMain?: boolean }) => Promise<boolean>;
   updateAccount: (id: string, patch: Partial<BankAccount>) => Promise<boolean>;
   deleteAccount: (id: string) => Promise<boolean>;
-  saveSalary: (year: number, month: number, amount: number, received: boolean) => Promise<boolean>;
-  clearSalary: (year: number, month: number) => Promise<boolean>;
+  saveSalary: (year: number, month: number, amount: number, received: boolean, day?: number) => Promise<boolean>;
+  clearSalary: (year: number, month: number, day?: number) => Promise<boolean>;
   addTransaction: (input: NewTransaction) => Promise<boolean>;
   updateTransaction: (id: string, patch: Partial<Transaction>) => Promise<boolean>;
   deleteTransaction: (id: string) => Promise<boolean>;
@@ -104,6 +104,10 @@ type LedgerController = {
   updateRecurring: (id: string, patch: Partial<Recurring>) => Promise<boolean>;
   deleteRecurring: (id: string) => Promise<boolean>;
   setRecurringSettled: (id: string, year: number, month: number, settled: boolean | null) => Promise<boolean>;
+  setRecurringAmount: (id: string, year: number, month: number, amount: number | null) => Promise<boolean>;
+  reorderRecurring: (ids: string[]) => Promise<boolean>;
+  reorderCards: (ids: string[]) => Promise<boolean>;
+  reorderCategories: (ids: string[]) => Promise<boolean>;
   addCard: (input: Omit<CreditCard, "id">) => Promise<boolean>;
   updateCard: (id: string, patch: Partial<CreditCard>) => Promise<boolean>;
   deleteCard: (id: string) => Promise<boolean>;
@@ -326,18 +330,27 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
           await saveSettings(next.settings);
         });
       },
-      saveSalary: (year, month, amount, received) => {
-        const existing = snap.salaries.find((salary) => salary.year === year && salary.month === month);
-        const salary = { id: existing?.id ?? createId(), year, month, amount, received };
+      saveSalary: (year, month, amount, received, day = snap.settings.payday) => {
+        const existing = snap.salaries.find(
+          (salary) => salary.year === year && salary.month === month && (salary.day ?? snap.settings.payday) === day,
+        );
+        const salary = { id: existing?.id ?? createId(), year, month, day, amount, received };
         const salaries = existing
           ? snap.salaries.map((item) => (item.id === existing.id ? salary : item))
           : [...snap.salaries, salary];
         return commit({ ...snap, salaries }, () => saveSalary(salary));
       },
-      clearSalary: (year, month) =>
+      clearSalary: (year, month, day) =>
         commit(
-          { ...snap, salaries: snap.salaries.filter((salary) => !(salary.year === year && salary.month === month)) },
-          () => deleteSalary(year, month),
+          {
+            ...snap,
+            salaries: snap.salaries.filter((salary) => {
+              if (salary.year !== year || salary.month !== month) return true;
+              if (day == null) return false;
+              return (salary.day ?? snap.settings.payday) !== day;
+            }),
+          },
+          () => deleteSalary(year, month, day),
         ),
       addTransaction: (input) => {
         const resolved =
@@ -437,7 +450,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         return commit({ ...snap, transactions }, () => saveTransactions(changed));
       },
       addRecurring: (input) => {
-        const item: Recurring = { ...input, id: createId() };
+        const item: Recurring = { ...input, id: createId(), sort: snap.recurring.length };
         return commit({ ...snap, recurring: [...snap.recurring, item] }, () => saveRecurring(item));
       },
       updateRecurring: (id, patch) => {
@@ -459,17 +472,35 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
           () => deleteRecurring(id),
         ),
       setRecurringSettled: (id, year, month, settled) => {
-        const marks =
-          settled == null
-            ? snap.recurringMarks.filter((mark) => !(mark.recurringId === id && mark.year === year && mark.month === month))
-            : upsertMark(snap.recurringMarks, { recurringId: id, year, month, settled });
+        const existing = snap.recurringMarks.find((mark) => mark.recurringId === id && mark.year === year && mark.month === month);
+        const drop = settled == null && existing?.amount == null;
+        const marks = drop
+          ? snap.recurringMarks.filter((mark) => mark !== existing)
+          : upsertMark(snap.recurringMarks, { recurringId: id, year, month, settled, amount: existing?.amount ?? null });
         return commit({ ...snap, recurringMarks: marks }, async () => {
-          if (settled == null) await deleteRecurringMark(id, year, month);
-          else await saveRecurringMark({ recurringId: id, year, month, settled });
+          if (drop) await deleteRecurringMark(id, year, month);
+          else await saveRecurringMark({ recurringId: id, year, month, settled, amount: existing?.amount ?? null });
         });
       },
+      setRecurringAmount: (id, year, month, amount) => {
+        const existing = snap.recurringMarks.find((mark) => mark.recurringId === id && mark.year === year && mark.month === month);
+        const drop = amount == null && existing?.settled == null;
+        const marks = drop
+          ? snap.recurringMarks.filter((mark) => mark !== existing)
+          : upsertMark(snap.recurringMarks, { recurringId: id, year, month, settled: existing?.settled ?? null, amount });
+        return commit({ ...snap, recurringMarks: marks }, async () => {
+          if (drop) await deleteRecurringMark(id, year, month);
+          else await saveRecurringMark({ recurringId: id, year, month, settled: existing?.settled ?? null, amount });
+        });
+      },
+      reorderRecurring: (ids) => reorder(snap.recurring, ids, (recurring) => commit({ ...snap, recurring }, () => Promise.all(recurring.map((item) => saveRecurring(item))).then(() => undefined))),
+      reorderCards: (ids) => reorder(snap.cards, ids, (cards) => commit({ ...snap, cards }, () => Promise.all(cards.map((card) => saveCard(card))).then(() => undefined))),
+      reorderCategories: (ids) =>
+        reorder(snap.categories, ids, (categories) =>
+          commit({ ...snap, categories }, () => Promise.all(categories.map((category) => saveCategory(category))).then(() => undefined)),
+        ),
       addCard: (input) => {
-        const card: CreditCard = { ...input, id: createId(), name: input.name.trim() };
+        const card: CreditCard = { ...input, id: createId(), name: input.name.trim(), sort: snap.cards.length };
         const transactions = snap.transactions.map((transaction) =>
           !transaction.cardId && instrumentMatches(transaction.instrument, card.name)
             ? { ...transaction, cardId: card.id }
@@ -550,6 +581,18 @@ function instrumentMatches(instrument: string | null, cardName: string): boolean
   const left = instrument.replace(/\s+/g, "");
   const right = cardName.replace(/\s+/g, "");
   return left.includes(right) || right.includes(left);
+}
+
+function reorder<T extends { id: string; sort?: number }>(
+  items: T[],
+  ids: string[],
+  save: (next: T[]) => Promise<boolean>,
+): Promise<boolean> {
+  const ranked = ids
+    .map((id) => items.find((item) => item.id === id))
+    .filter((item): item is T => Boolean(item));
+  const missing = items.filter((item) => !ids.includes(item.id));
+  return save([...ranked, ...missing].map((item, sort) => ({ ...item, sort })));
 }
 
 function upsertMark(

@@ -4,7 +4,7 @@ import { recurringForAccount, resolveAccount, transactionBank } from "./accounts
 import { cycleForDate } from "./cardCycle";
 import { categoryBreakdown } from "./analytics";
 import { resolveCategoryId } from "./classify";
-import { buildForecast } from "./forecast";
+import { buildForecast, recurringAmount } from "./forecast";
 import { clampDay } from "./format";
 import { accountMark, cardMark } from "./marks";
 import { parseNotification } from "./parseNotification";
@@ -266,6 +266,81 @@ describe("buildForecast", () => {
     });
     expect(forecast.cardPendingTotal).toBe(80_000);
     expect(forecast.expectedBalance).toBe(920_000);
+  });
+
+  it("adds each unpaid salary day and skips a day that already passed", () => {
+    const early = buildForecast({
+      today: { year: 2026, month: 10, day: 8 },
+      balance: 1_000_000,
+      payday: 25,
+      salaries: [
+        { id: "a", year: 2026, month: 9, day: 25, amount: 2_000_000, received: true },
+        { id: "b", year: 2026, month: 9, day: 31, amount: 500_000, received: true },
+      ],
+      recurring: [],
+      recurringMarks: [],
+      cards: [],
+      cardMarks: [],
+      transactions: [],
+    });
+    expect(early.salaryAmount).toBe(2_500_000);
+    expect(early.expectedBalance).toBe(3_500_000);
+
+    const later = buildForecast({
+      ...{
+        today: { year: 2026, month: 10, day: 26 },
+        balance: 1_000_000,
+        payday: 25,
+        salaries: [
+          { id: "a", year: 2026, month: 9, day: 25, amount: 2_000_000, received: true },
+          { id: "b", year: 2026, month: 9, day: 31, amount: 500_000, received: true },
+        ],
+        recurring: [],
+        recurringMarks: [],
+        cards: [],
+        cardMarks: [],
+        transactions: [],
+      },
+    });
+    expect(later.salaryLines.filter((line) => line.pending).map((line) => line.day)).toEqual([31]);
+    expect(later.expectedBalance).toBe(1_500_000);
+  });
+
+  it("uses this month's variable amount, then last month's", () => {
+    const item = { id: "fee", name: "관리비", amount: 0, dayOfMonth: 10, categoryId: null, accountId: null, enabled: true };
+    const transactions = [tx("old", 180_000, "2026-09-10T03:00:00.000Z", null)];
+    transactions[0].merchant = "아파트관리비";
+    const withReference = { ...item, referenceMerchant: "아파트관리비" };
+    expect(recurringAmount(withReference, 2026, 10, [], transactions)).toEqual({ amount: 180_000, fromPreviousMonth: true });
+    expect(
+      recurringAmount(item, 2026, 10, [{ recurringId: "fee", year: 2026, month: 9, settled: null, amount: 150_000 }], []),
+    ).toEqual({ amount: 150_000, fromPreviousMonth: true });
+    expect(
+      recurringAmount(
+        item,
+        2026,
+        10,
+        [
+          { recurringId: "fee", year: 2026, month: 9, settled: null, amount: 150_000 },
+          { recurringId: "fee", year: 2026, month: 10, settled: null, amount: 170_000 },
+        ],
+        [],
+      ),
+    ).toEqual({ amount: 170_000, fromPreviousMonth: false });
+
+    const forecast = buildForecast({
+      today: { year: 2026, month: 10, day: 8 },
+      balance: 1_000_000,
+      payday: 25,
+      salaries: [],
+      recurring: [withReference],
+      recurringMarks: [],
+      cards: [],
+      cardMarks: [],
+      transactions,
+    });
+    expect(forecast.recurringPending[0]).toMatchObject({ amount: 180_000, variable: true, fromPreviousMonth: true });
+    expect(forecast.expectedBalance).toBe(820_000);
   });
 });
 

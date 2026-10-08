@@ -1,5 +1,7 @@
 import { useState } from "react";
+import { SortableList } from "../components/Sortable";
 import { useLedger } from "../context/LedgerContext";
+import { bySort } from "../lib/order";
 import { resolveCategoryId } from "../lib/classify";
 import { Button, Field, SelectInput, TextInput } from "../components/Ui";
 
@@ -78,14 +80,11 @@ export function RulesPage() {
         </Button>
       </section>
 
-      <div className="space-y-3">
-        {ledger.snap.categories
-          .slice()
-          .sort((a, b) => a.sort - b.sort)
-          .map((category) => {
+      <SortableList items={bySort(ledger.snap.categories)} onReorder={(ids) => void ledger.reorderCategories(ids)}>
+        {(category) => {
             const rules = ledger.snap.rules.filter((rule) => rule.categoryId === category.id);
             return (
-              <article key={category.id} className="sheet p-4">
+              <article className="sheet p-4">
                 <div className="flex items-center justify-between gap-3">
                   <h3 className="font-semibold">
                     <span className="mr-2 inline-block h-2.5 w-2.5 rounded-full" style={{ background: category.color }} />
@@ -105,8 +104,8 @@ export function RulesPage() {
                 </div>
               </article>
             );
-          })}
-      </div>
+        }}
+      </SortableList>
     </div>
   );
 }

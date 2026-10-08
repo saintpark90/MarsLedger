@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useLedger } from "../context/LedgerContext";
+import { SortableList } from "../components/Sortable";
 import { AccountField, AccountThumb, CardThumb } from "../components/Thumbs";
+import { bySort } from "../lib/order";
 import { Button, Field, SelectInput, TextInput } from "../components/Ui";
 import { accountLabel, mainAccount } from "../lib/accounts";
 import { MONTH_OFFSETS, cycleForDate, cycleOrderValid, defaultCardCycle, offsetLabel } from "../lib/cardCycle";
@@ -129,13 +131,13 @@ export function CardsPage() {
         </section>
       )}
 
-      <div className="space-y-4">
-        {ledger.snap.cards.length === 0 && <p className="text-sm text-muted">등록된 카드가 없습니다.</p>}
-        {ledger.snap.cards.map((card) => {
+      {ledger.snap.cards.length === 0 && <p className="text-sm text-muted">등록된 카드가 없습니다.</p>}
+      <SortableList items={bySort(ledger.snap.cards)} onReorder={(ids) => void ledger.reorderCards(ids)}>
+        {(card) => {
           const line = forecast.cardLines.find((item) => item.id === card.id);
-          return <CardBlock key={card.id} card={card} line={line} />;
-        })}
-      </div>
+          return <CardBlock card={card} line={line} />;
+        }}
+      </SortableList>
     </div>
   );
 }

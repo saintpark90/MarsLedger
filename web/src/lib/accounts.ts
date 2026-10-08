@@ -138,8 +138,16 @@ export function normalizeSnapshot(snap: LedgerSnapshot): LedgerSnapshot {
   return {
     ...snap,
     accounts,
-    cards: snap.cards.map(normalizeCard),
-    recurring: (snap.recurring ?? []).map((item) => ({ ...item, accountId: item.accountId ?? null })),
+    cards: snap.cards.map((card, index) => normalizeCard(card, index)),
+    recurring: (snap.recurring ?? []).map((item, index) => ({
+      ...item,
+      accountId: item.accountId ?? null,
+      sort: item.sort ?? index,
+      referenceMerchant: item.referenceMerchant ?? null,
+      referenceTransactionId: item.referenceTransactionId ?? null,
+    })),
+    salaries: (snap.salaries ?? []).map((salary) => ({ ...salary, day: salary.day && salary.day >= 1 ? salary.day : snap.settings.payday })),
+    recurringMarks: (snap.recurringMarks ?? []).map((mark) => ({ ...mark, settled: mark.settled ?? null, amount: mark.amount ?? null })),
     transactions: snap.transactions.map(normalizeTransaction),
     settings: {
       ...snap.settings,
@@ -154,10 +162,11 @@ function ensureOneMain(accounts: BankAccount[]): BankAccount[] {
   return accounts.map((account) => ({ ...account, isMain: account.id === main.id }));
 }
 
-function normalizeCard(card: CreditCard): CreditCard {
+function normalizeCard(card: CreditCard, index = 0): CreditCard {
   return {
     ...defaultCardCycle,
     ...card,
+    sort: card.sort ?? index,
     paymentAccountId: card.paymentAccountId ?? null,
     periodStartOffset: card.periodStartOffset ?? defaultCardCycle.periodStartOffset,
     periodStartDay: card.periodStartDay ?? defaultCardCycle.periodStartDay,

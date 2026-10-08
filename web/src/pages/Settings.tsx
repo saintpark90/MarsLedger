@@ -3,11 +3,11 @@ import { Link } from "react-router-dom";
 import { useLedger } from "../context/LedgerContext";
 import { accountLabel, mainAccount, unseenSignals } from "../lib/accounts";
 import { readConnection } from "../lib/connection";
-import { monthLabel, parseAmountInput, previousMonth, seoulParts, won } from "../lib/format";
+import { monthLabel, parseAmountInput, previousMonth, seoulParts } from "../lib/format";
 import { useInstallPrompt } from "../components/useInstall";
 import { AccountThumb } from "../components/Thumbs";
 import { Button, Field, TextInput } from "../components/Ui";
-import type { BankAccount } from "../lib/types";
+import type { BankAccount, Salary } from "../lib/types";
 
 export function SettingsPage() {
   const ledger = useLedger();
@@ -22,11 +22,8 @@ export function SettingsPage() {
   const [accountBalance, setAccountBalance] = useState("");
   const main = mainAccount(ledger.snap);
   const signals = unseenSignals(ledger.snap.transactions, ledger.snap.accounts);
-  const currentSalary = ledger.snap.salaries.find((salary) => salary.year === today.year && salary.month === today.month);
-  const previousSalary = ledger.snap.salaries.find((salary) => salary.year === previous.year && salary.month === previous.month);
-  const [currentAmount, setCurrentAmount] = useState(currentSalary ? String(currentSalary.amount) : "");
-  const [currentReceived, setCurrentReceived] = useState(currentSalary?.received ?? false);
-  const [previousAmount, setPreviousAmount] = useState(previousSalary ? String(previousSalary.amount) : "");
+  const currentSalaries = ledger.snap.salaries.filter((salary) => salary.year === today.year && salary.month === today.month);
+  const previousSalaries = ledger.snap.salaries.filter((salary) => salary.year === previous.year && salary.month === previous.month);
   const [url, setUrl] = useState(connection?.url ?? "");
   const [anonKey, setAnonKey] = useState(connection?.anonKey ?? "");
 
@@ -154,47 +151,15 @@ export function SettingsPage() {
         </Button>
       </section>
 
-      <section className="sheet space-y-3 p-4">
-        <h3 className="font-semibold">급여</h3>
-        <p className="text-sm text-muted">
-          이번 달 금액이 없으면 지난달 급여로 예상 잔액을 계산합니다. 입금 완료로 표시하면 이미 통장 잔액에 들어 있는 것으로 보고 다시 더하지 않습니다.
-        </p>
-        <div className="grid gap-3 md:grid-cols-2">
-          <Field label={`${monthLabel(today.year, today.month)} 급여`}>
-            <TextInput inputMode="numeric" value={currentAmount} onChange={(event) => setCurrentAmount(event.target.value)} />
-          </Field>
-          <Field label={`${monthLabel(previous.year, previous.month)} 급여`}>
-            <TextInput inputMode="numeric" value={previousAmount} onChange={(event) => setPreviousAmount(event.target.value)} />
-          </Field>
+      <section className="sheet space-y-4 p-4">
+        <div>
+          <h3 className="font-semibold">급여</h3>
+          <p className="mt-1 text-sm text-muted">
+            급여일이 여러 번이면 각각 넣습니다. 이번 달 금액이 없으면 지난달 같은 날짜의 금액을, 그 날이 오기 전까지만 더합니다. 입금 완료로 표시하면 이미 잔액에 있는 것으로 보고 다시 더하지 않습니다.
+          </p>
         </div>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={currentReceived} onChange={(event) => setCurrentReceived(event.target.checked)} />
-          이번 달 급여가 이미 들어옴
-        </label>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            tone="pine"
-            onClick={() => {
-              const amount = parseAmountInput(currentAmount);
-              if (amount <= 0) return;
-              void ledger.saveSalary(today.year, today.month, amount, currentReceived);
-            }}
-          >
-            이번 달 저장
-          </Button>
-          <Button tone="ghost" onClick={() => void ledger.clearSalary(today.year, today.month)}>
-            이번 달 입력 지우기
-          </Button>
-          <Button
-            tone="ghost"
-            onClick={() => void ledger.saveSalary(previous.year, previous.month, parseAmountInput(previousAmount), true)}
-          >
-            지난달 저장
-          </Button>
-        </div>
-        <p className="text-sm text-muted">
-          이번 달 {currentSalary ? won(currentSalary.amount) : "미입력"} · 지난달 {previousSalary ? won(previousSalary.amount) : "미입력"}
-        </p>
+        <SalaryMonth year={today.year} month={today.month} salaries={currentSalaries} payday={ledger.snap.settings.payday} />
+        <SalaryMonth year={previous.year} month={previous.month} salaries={previousSalaries} payday={ledger.snap.settings.payday} />
       </section>
 
       <section className="sheet space-y-2 p-4 text-sm leading-6">
@@ -272,6 +237,85 @@ export function SettingsPage() {
           </div>
         </section>
       )}
+    </div>
+  );
+}
+
+function SalaryMonth({
+  year,
+  month,
+  salaries,
+  payday,
+}: {
+  year: number;
+  month: number;
+  salaries: Salary[];
+  payday: number;
+}) {
+  const ledger = useLedger();
+  const [day, setDay] = useState(String(payday));
+  const [amount, setAmount] = useState("");
+  const rows = [...salaries].sort((left, right) => (left.day ?? payday) - (right.day ?? payday));
+
+  return (
+    <div className="space-y-2">
+      <p className="text-sm font-medium">{monthLabel(year, month)}</p>
+      {rows.length === 0 && <p className="text-sm text-muted">입력 없음</p>}
+      {rows.map((salary) => (
+        <SalaryRow key={salary.id} salary={salary} />
+      ))}
+      <div className="grid gap-2 md:grid-cols-[100px_1fr_auto] md:items-end">
+        <Field label="급여일">
+          <TextInput inputMode="numeric" value={day} onChange={(event) => setDay(event.target.value)} />
+        </Field>
+        <Field label="금액">
+          <TextInput inputMode="numeric" value={amount} onChange={(event) => setAmount(event.target.value)} />
+        </Field>
+        <Button
+          tone="pine"
+          onClick={() => {
+            const payDay = Number(day);
+            const value = parseAmountInput(amount);
+            if (payDay < 1 || payDay > 31 || value <= 0) return;
+            void ledger.saveSalary(year, month, value, false, payDay);
+            setAmount("");
+          }}
+        >
+          급여 추가
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function SalaryRow({ salary }: { salary: Salary }) {
+  const ledger = useLedger();
+  const [amount, setAmount] = useState(String(salary.amount));
+  const [received, setReceived] = useState(salary.received);
+
+  return (
+    <div className="grid gap-2 rounded-lg bg-white p-3 md:grid-cols-[80px_1fr_auto_auto] md:items-center">
+      <p className="text-sm">{salary.day ?? "급여"}일</p>
+      <TextInput inputMode="numeric" value={amount} onChange={(event) => setAmount(event.target.value)} />
+      <label className="flex items-center gap-2 text-sm">
+        <input type="checkbox" checked={received} onChange={(event) => setReceived(event.target.checked)} />
+        들어옴
+      </label>
+      <div className="flex gap-2">
+        <Button
+          tone="ghost"
+          onClick={() => {
+            const value = parseAmountInput(amount);
+            if (value <= 0 || !salary.day) return;
+            void ledger.saveSalary(salary.year, salary.month, value, received, salary.day);
+          }}
+        >
+          저장
+        </Button>
+        <Button tone="clay" onClick={() => void ledger.clearSalary(salary.year, salary.month, salary.day)}>
+          삭제
+        </Button>
+      </div>
     </div>
   );
 }

@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { useLedger } from "../context/LedgerContext";
+import { SortableList } from "../components/Sortable";
 import { AccountField, AccountThumb } from "../components/Thumbs";
 import { Button, Field, SelectInput, TextInput } from "../components/Ui";
 import { accountLabel, mainAccount } from "../lib/accounts";
-import { buildForecast } from "../lib/forecast";
-import { clampDay, monthLabel, parseAmountInput, recurringDayText, seoulParts, won } from "../lib/format";
-import type { Recurring } from "../lib/types";
+import { buildForecast, recurringAmount } from "../lib/forecast";
+import { clampDay, formatKoreanDate, monthLabel, parseAmountInput, previousMonth, recurringDayText, seoulParts, won } from "../lib/format";
+import { bySort } from "../lib/order";
+import type { Recurring, Transaction } from "../lib/types";
 
 export function RecurringPage() {
   const ledger = useLedger();
@@ -45,7 +47,7 @@ export function RecurringPage() {
           <TextInput value={name} onChange={(event) => setName(event.target.value)} placeholder="월세" />
         </Field>
         <Field label="금액">
-          <TextInput inputMode="numeric" value={amount} onChange={(event) => setAmount(event.target.value)} />
+          <TextInput inputMode="numeric" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0이면 매달 변동" />
         </Field>
         <Field label="매달">
           <TextInput inputMode="numeric" value={day} onChange={(event) => setDay(event.target.value)} />
@@ -77,7 +79,7 @@ export function RecurringPage() {
             onClick={() => {
               const value = parseAmountInput(amount);
               const dayOfMonth = Number(day);
-              if (!name.trim() || value <= 0 || dayOfMonth < 1 || dayOfMonth > 31) return;
+              if (!name.trim() || amount.trim() === "" || value < 0 || dayOfMonth < 1 || dayOfMonth > 31) return;
               void ledger.addRecurring({
                 name: name.trim(),
                 amount: value,
@@ -95,12 +97,10 @@ export function RecurringPage() {
         </div>
       </section>
 
-      <ul className="space-y-3">
-        {ledger.snap.recurring.length === 0 && <li className="text-sm text-muted">등록된 자동이체가 없습니다.</li>}
-        {ledger.snap.recurring.map((item) => (
-          <RecurringItem key={item.id} item={item} pending={pending.has(item.id)} />
-        ))}
-      </ul>
+      {ledger.snap.recurring.length === 0 && <p className="text-sm text-muted">등록된 자동이체가 없습니다.</p>}
+      <SortableList items={bySort(ledger.snap.recurring)} onReorder={(ids) => void ledger.reorderRecurring(ids)}>
+        {(item) => <RecurringItem item={item} pending={pending.has(item.id)} />}
+      </SortableList>
     </div>
   );
 }
@@ -111,6 +111,8 @@ function RecurringItem({ item, pending }: { item: Recurring; pending: boolean })
   const main = mainAccount(ledger.snap);
   const account = ledger.snap.accounts.find((entry) => entry.id === item.accountId) ?? main;
   const category = ledger.snap.categories.find((entry) => entry.id === item.categoryId);
+  const priced = recurringAmount(item, today.year, today.month, ledger.snap.recurringMarks, ledger.snap.transactions);
+  const monthMark = ledger.snap.recurringMarks.find((mark) => mark.recurringId === item.id && mark.year === today.year && mark.month === today.month);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(item.name);
   const [amount, setAmount] = useState(String(item.amount));
@@ -128,7 +130,7 @@ function RecurringItem({ item, pending }: { item: Recurring; pending: boolean })
   }
 
   return (
-    <li className="sheet space-y-3 p-4">
+    <div className="sheet space-y-3 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-start gap-3">
           <AccountThumb name={account.name} bankName={account.bankName} />
@@ -137,7 +139,7 @@ function RecurringItem({ item, pending }: { item: Recurring; pending: boolean })
             {item.name} · 매달 {recurringDayText(item.dayOfMonth)}
           </p>
           <p className="text-sm text-muted">
-            <span className="tabular">{won(item.amount)}</span>
+            <span className="tabular">{item.amount <= 0 ? `변동 · 이번 달 ${won(priced.amount)}` : won(item.amount)}</span>
             {" · "}
             {accountLabel(account)}
             {category ? ` · ${category.name}` : ""}
@@ -168,6 +170,9 @@ function RecurringItem({ item, pending }: { item: Recurring; pending: boolean })
           </Button>
         </div>
       </div>
+      {item.amount <= 0 && (
+        <VariableAmount item={item} expected={monthMark?.amount ?? null} fallback={priced.amount} fromPrevious={priced.fromPreviousMonth} />
+      )}
       {editing && (
         <div className="grid gap-3 border-t border-line pt-3 md:grid-cols-6">
           <Field label="이름">
@@ -206,7 +211,7 @@ function RecurringItem({ item, pending }: { item: Recurring; pending: boolean })
               onClick={() => {
                 const value = parseAmountInput(amount);
                 const dayOfMonth = Number(day);
-                if (!name.trim() || value <= 0 || dayOfMonth < 1 || dayOfMonth > 31) return;
+                if (!name.trim() || amount.trim() === "" || value < 0 || dayOfMonth < 1 || dayOfMonth > 31) return;
                 void ledger
                   .updateRecurring(item.id, {
                     name: name.trim(),
@@ -228,7 +233,85 @@ function RecurringItem({ item, pending }: { item: Recurring; pending: boolean })
           </div>
         </div>
       )}
-    </li>
+    </div>
+  );
+}
+
+function VariableAmount({
+  item,
+  expected,
+  fallback,
+  fromPrevious,
+}: {
+  item: Recurring;
+  expected: number | null;
+  fallback: number;
+  fromPrevious: boolean;
+}) {
+  const ledger = useLedger();
+  const today = seoulParts();
+  const prev = previousMonth(today.year, today.month);
+  const [amount, setAmount] = useState(expected == null ? "" : String(expected));
+  const [query, setQuery] = useState("");
+  const expenses = ledger.snap.transactions
+    .filter((transaction) => transaction.direction === "expense" && !transaction.excluded)
+    .sort((left, right) => +new Date(right.occurredAt) - +new Date(left.occurredAt));
+  const shown = expenses.filter((transaction) => !query.trim() || transaction.merchant.includes(query.trim())).slice(0, 6);
+
+  function pick(transaction: Transaction | null) {
+    void ledger.updateRecurring(item.id, {
+      referenceTransactionId: transaction?.id ?? null,
+      referenceMerchant: transaction?.merchant ?? null,
+    });
+  }
+
+  return (
+    <div className="space-y-3 border-t border-line pt-3">
+      <p className="text-sm text-muted">
+        매달 금액이 달라집니다. 이번 달 예상을 비우면 {fromPrevious ? `지난달 ${won(fallback)}` : "지난달 금액"}을 계산에 넣습니다.
+      </p>
+      <div className="grid gap-3 md:grid-cols-[180px_1fr] md:items-end">
+        <Field label={`${monthLabel(today.year, today.month)} 예상`}>
+          <TextInput
+            inputMode="numeric"
+            value={amount}
+            placeholder={fromPrevious ? String(fallback) : "지난달 금액 없음"}
+            onChange={(event) => setAmount(event.target.value)}
+            onBlur={() => {
+              const next = amount.trim() ? parseAmountInput(amount) : null;
+              if (next === expected) return;
+              void ledger.setRecurringAmount(item.id, today.year, today.month, next);
+            }}
+          />
+        </Field>
+        <Field label="참고할 지출 내역">
+          <TextInput value={query} onChange={(event) => setQuery(event.target.value)} placeholder="사용처 검색" />
+        </Field>
+      </div>
+      <p className="text-sm">
+        참고 이름: <strong>{item.referenceMerchant || "아직 없음"}</strong>
+        {item.referenceMerchant && (
+          <button className="ml-2 text-pine" onClick={() => pick(null)}>
+            지우기
+          </button>
+        )}
+      </p>
+      <div className="flex flex-wrap gap-2">
+        {shown.map((transaction) => (
+          <button
+            key={transaction.id}
+            className="rounded-full bg-white px-3 py-1 text-left text-sm"
+            onClick={() => pick(transaction)}
+          >
+            {transaction.merchant} · {formatKoreanDate(transaction.occurredAt)} · {won(transaction.amount)}
+          </button>
+        ))}
+        {shown.length === 0 && <p className="text-sm text-muted">고를 지출 내역이 없습니다.</p>}
+      </div>
+      <p className="text-sm text-muted">
+        {monthLabel(prev.year, prev.month)}에 같은 이름으로 나간 금액이 있으면, 이번 달 예상을 비웠을 때 그 금액을 씁니다.
+      </p>
+    </div>
   );
 }
 

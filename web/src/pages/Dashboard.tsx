@@ -3,51 +3,39 @@ import { Link } from "react-router-dom";
 import { useLedger } from "../context/LedgerContext";
 import { cardsPaidFrom, mainAccount, recurringForAccount, resolveAccount, transactionBank } from "../lib/accounts";
 import { categoryBreakdown } from "../lib/analytics";
-import { buildForecast } from "../lib/forecast";
+import { buildForecast, type Forecast } from "../lib/forecast";
 import { formatKoreanDateTime, formatKoreanYmd, monthLabel, recurringDayText, seoulParts, won } from "../lib/format";
+import { bySort } from "../lib/order";
 import { AccountThumb, CardThumb, LedgerThumb } from "../components/Thumbs";
 import { Button, Signed } from "../components/Ui";
-import type { LedgerSnapshot, YMD } from "../lib/types";
+import type { LedgerSnapshot } from "../lib/types";
 
 export function Dashboard() {
   const ledger = useLedger();
   const today = seoulParts();
   const { snap } = ledger;
   const main = mainAccount(snap);
-  const forecast = useMemo(
+  const accounts = [...snap.accounts].sort((left, right) => Number(right.isMain) - Number(left.isMain));
+  const rows = useMemo(
     () =>
-      buildForecast({
-        today,
-        balance: main.balance,
-        payday: snap.settings.payday,
-        salaries: snap.salaries,
-        recurring: recurringForAccount(snap.recurring, main, snap.accounts),
-        recurringMarks: snap.recurringMarks,
-        cards: cardsPaidFrom(snap.cards, main),
-        cardMarks: snap.cardMarks,
-        transactions: snap.transactions,
-      }),
-    [snap, today, main],
+      accounts.map((account) => ({
+        account,
+        forecast: buildForecast({
+          today,
+          balance: account.balance,
+          payday: snap.settings.payday,
+          salaries: account.isMain ? snap.salaries : [],
+          recurring: bySort(recurringForAccount(snap.recurring, account, snap.accounts)),
+          recurringMarks: snap.recurringMarks,
+          cards: bySort(cardsPaidFrom(snap.cards, account)),
+          cardMarks: snap.cardMarks,
+          transactions: snap.transactions,
+        }),
+      })),
+    [accounts, snap, today],
   );
-  const allCards = useMemo(
-    () =>
-      buildForecast({
-        today,
-        balance: 0,
-        payday: snap.settings.payday,
-        salaries: [],
-        recurring: [],
-        recurringMarks: [],
-        cards: snap.cards,
-        cardMarks: snap.cardMarks,
-        transactions: snap.transactions,
-      }),
-    [snap, today],
-  );
+  const expectedTotal = rows.reduce((sum, row) => sum + row.forecast.expectedBalance, 0);
   const breakdown = categoryBreakdown(snap.transactions, snap.categories, today.year, today.month);
-  const spent = breakdown.reduce((sum, row) => sum + row.amount, 0);
-  const allCardLines = allCards.cardLines;
-  const usage = allCardLines.reduce((sum, card) => sum + card.usageThisMonth, 0);
   const max = breakdown[0]?.amount ?? 1;
   const recent = [...snap.transactions].sort((a, b) => +new Date(b.occurredAt) - +new Date(a.occurredAt)).slice(0, 5);
   const balanceHint = latestBalanceHint(snap);
@@ -55,17 +43,16 @@ export function Dashboard() {
   return (
     <div className="space-y-5">
       <section className="sheet border-l-8 border-l-spine p-5 md:p-7">
-        <p className="flex items-center gap-2 text-sm text-muted">
-          <AccountThumb name={main.name} bankName={main.bankName} size="sm" />
-          {monthLabel(today.year, today.month)} 정산 후 예상 잔액
-        </p>
-        <p className="tabular mt-2 text-4xl font-semibold tracking-tight md:text-5xl">{won(forecast.expectedBalance)}</p>
+        <p className="text-sm text-muted">{monthLabel(today.year, today.month)} 정산 후 남는 돈</p>
+        <p className="tabular mt-2 text-4xl font-semibold tracking-tight md:text-5xl">{won(expectedTotal)}</p>
         <p className="mt-2 max-w-xl text-sm leading-6 text-muted">
-          {main.name}에서 이번 달에 빠지는 자동이체와 카드대금만 빼고, 들어오기 전인 급여를 더한 금액입니다. 다음 달에 빠지는 카드값은 아래에 출금일과 함께 표시합니다.
+          지금 통장 잔액에 아직 들어오지 않은 급여를 더하고, 이번 달에 빠지는 자동이체와 카드대금만 뺀 금액입니다. 다음 달에 빠지는 카드값은 통장 아래에 출금일만 적어 두고 이번 계산에는 넣지 않습니다.
         </p>
       </section>
 
-      <AccountBalances snap={snap} today={today} />
+      {rows.map(({ account, forecast }) => (
+        <AccountForecast key={account.id} accountName={account.name} bankName={account.bankName} isMain={account.isMain} forecast={forecast} />
+      ))}
 
       {balanceHint && snap.settings.syncBalance && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white px-4 py-3 text-sm">
@@ -89,105 +76,6 @@ export function Dashboard() {
           </Button>
         </div>
       )}
-
-      <div className="grid gap-5 lg:grid-cols-[1.2fr_0.8fr]">
-        <section className="sheet p-5">
-          <h2 className="text-lg font-semibold">예상 잔액 계산</h2>
-          <dl className="mt-4 space-y-3 text-sm">
-            <Line
-              label={
-                <span className="inline-flex items-center gap-2">
-                  <AccountThumb name={main.name} bankName={main.bankName} size="sm" />
-                  현재 {main.name}
-                </span>
-              }
-              value={forecast.balance}
-              plain
-            />
-            <Line label="남은 자동이체" value={-forecast.recurringPendingTotal} />
-            <Line label="자동이체 후" value={forecast.afterTransfers} plain />
-            <Line label="남은 카드대금" value={-forecast.cardPendingTotal} />
-            <Line label="카드대금 후" value={forecast.afterCards} plain />
-            <Line
-              label={forecast.salaryUsedPreviousMonth ? "예정 급여 · 지난달 금액" : "예정 급여"}
-              value={forecast.salaryPending ? forecast.salaryAmount : 0}
-            />
-            <div className="flex items-center justify-between border-t border-line pt-3 text-base font-semibold">
-              <dt>최종 예상</dt>
-              <dd className="tabular">{won(forecast.expectedBalance)}</dd>
-            </div>
-          </dl>
-          <div className="mt-4 space-y-1 text-sm text-muted">
-            {forecast.recurringPending.map((item) => {
-              const source = snap.recurring.find((entry) => entry.id === item.id);
-              const account = snap.accounts.find((entry) => entry.id === source?.accountId) ?? main;
-              return (
-                <p key={item.id} className="flex items-center gap-2">
-                  <AccountThumb name={account.name} bankName={account.bankName} size="sm" />
-                  <span>
-                    {item.name} · {recurringDayText(item.dayOfMonth)} · {won(item.amount)}
-                  </span>
-                </p>
-              );
-            })}
-            {forecast.cardLines
-              .filter((card) => card.pending && card.billAmount !== 0)
-              .map((card) => (
-                <p key={card.id} className="flex items-center gap-2">
-                  <CardThumb name={card.name} color={card.color} size="sm" />
-                  <span>
-                    {card.name} 청구 · {card.paymentMonth}월 {card.paymentDay}일 · {won(card.billAmount)}
-                  </span>
-                </p>
-              ))}
-            {forecast.cardLines
-              .filter((card) => card.upcoming && card.usageThisMonth !== 0)
-              .map((card) => (
-                <p key={`${card.id}-next`} className="flex items-center gap-2">
-                  <CardThumb name={card.name} color={card.color} size="sm" />
-                  <span>
-                    {card.name} · {formatKoreanYmd(card.openStart)}~{formatKoreanYmd(card.openEnd)} · {formatKoreanYmd(card.openPayment)} 출금 · {won(card.usageThisMonth)}
-                  </span>
-                </p>
-              ))}
-            {!forecast.salaryKnown && <p>급여 금액이 없습니다. 설정에서 지난달 급여를 입력하면 예상에 포함됩니다.</p>}
-            {forecast.salaryPending && forecast.salaryKnown && (
-              <p>{forecast.salaryUsedPreviousMonth ? "이번 달 급여가 없어 지난달 금액으로 계산했습니다." : "이번 달 급여는 아직 들어오기 전으로 계산했습니다."}</p>
-            )}
-            {!forecast.salaryPending && <p>급여는 이미 통장 잔액에 포함된 것으로 계산했습니다.</p>}
-          </div>
-        </section>
-
-        <div className="grid gap-5">
-          <section className="sheet p-5">
-            <p className="text-sm text-muted">현재 신용카드 사용액</p>
-            <p className="tabular mt-1 text-3xl font-semibold">{won(usage)}</p>
-            <p className="mt-1 text-sm text-muted">지금 이용기간에 쌓인 금액입니다. 출금일은 카드마다 다릅니다.</p>
-            <div className="mt-3 space-y-1 text-sm text-muted">
-              {allCardLines
-                .filter((card) => card.usageThisMonth !== 0 || (card.pending && card.billAmount !== 0))
-                .map((card) => (
-                  <p key={card.id} className="flex items-center gap-2">
-                    <CardThumb name={card.name} color={card.color} size="sm" />
-                    <span>
-                      {card.name} · {formatKoreanYmd(card.openStart)}~{formatKoreanYmd(card.openEnd)} · {formatKoreanYmd(card.openPayment)} 출금 · {won(card.usageThisMonth)}
-                    </span>
-                  </p>
-                ))}
-            </div>
-            <Link to="/cards" className="mt-3 inline-block text-sm text-pine">
-              카드 결제 관리
-            </Link>
-          </section>
-          <section className="sheet p-5">
-            <p className="text-sm text-muted">이번 달 지출</p>
-            <p className="tabular mt-1 text-3xl font-semibold">{won(spent)}</p>
-            <Link to="/analytics" className="mt-3 inline-block text-sm text-pine">
-              소비 패턴 보기
-            </Link>
-          </section>
-        </div>
-      </div>
 
       <section className="sheet p-5">
         <div className="flex items-center justify-between">
@@ -245,51 +133,82 @@ export function Dashboard() {
   );
 }
 
-function AccountBalances({ snap, today }: { snap: LedgerSnapshot; today: YMD }) {
-  const rows = snap.accounts.map((account) => {
-    const view = buildForecast({
-      today,
-      balance: account.balance,
-      payday: account.isMain ? snap.settings.payday : 31,
-      salaries: account.isMain ? snap.salaries : [],
-      recurring: recurringForAccount(snap.recurring, account, snap.accounts),
-      recurringMarks: snap.recurringMarks,
-      cards: cardsPaidFrom(snap.cards, account),
-      cardMarks: snap.cardMarks,
-      transactions: snap.transactions,
-    });
-    return { account, expected: view.expectedBalance };
-  });
-  const total = rows.reduce((sum, row) => sum + row.account.balance, 0);
-  const expectedTotal = rows.reduce((sum, row) => sum + row.expected, 0);
-
+function AccountForecast({
+  accountName,
+  bankName,
+  isMain,
+  forecast,
+}: {
+  accountName: string;
+  bankName: string;
+  isMain: boolean;
+  forecast: Forecast;
+}) {
+  const upcoming = forecast.cardLines.filter((card) => card.upcoming && card.usageThisMonth !== 0);
+  const bills = forecast.cardLines.filter((card) => card.pending && card.billAmount !== 0);
   return (
     <section className="sheet p-5 md:p-7">
-      <h2 className="text-lg font-semibold">통장 잔액</h2>
-      <ul className="mt-2 divide-y divide-line">
-        {rows.map(({ account, expected }) => (
-          <li key={account.id} className="flex items-center justify-between gap-4 py-4">
-            <div className="flex items-center gap-3">
-              <AccountThumb name={account.name} bankName={account.bankName} />
-              <div>
-              <p className="text-base font-medium">
-                {account.name}
-                {account.isMain ? " · 메인" : ""}
-              </p>
-              <p className="text-sm text-muted">정산 후 {won(expected)}</p>
-              </div>
-            </div>
-            <p className="tabular text-2xl font-semibold md:text-3xl">{won(account.balance)}</p>
-          </li>
-        ))}
-      </ul>
-      <div className="flex items-end justify-between gap-4 border-t border-line pt-4">
-        <div>
-          <p className="text-base font-semibold">합계</p>
-          <p className="text-sm text-muted">정산 후 {won(expectedTotal)}</p>
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <AccountThumb name={accountName} bankName={bankName} />
+          <div>
+            <h2 className="text-lg font-semibold">
+              {accountName}
+              {isMain ? " · 메인" : ""}
+            </h2>
+            <p className="text-sm text-muted">이번 달 정산 후</p>
+          </div>
         </div>
-        <p className="tabular text-3xl font-semibold">{won(total)}</p>
+        <p className="tabular text-3xl font-semibold md:text-4xl">{won(forecast.expectedBalance)}</p>
       </div>
+      <dl className="mt-4 space-y-3 text-sm">
+        <Line label="현재 잔액" value={forecast.balance} plain />
+        {forecast.salaryLines
+          .filter((line) => line.pending)
+          .map((line) => (
+            <Line
+              key={line.id}
+              label={`급여 · ${line.day}일${line.usedPreviousMonth ? " · 지난달 금액" : ""}`}
+              value={line.amount}
+            />
+          ))}
+        {isMain && forecast.salaryLines.length === 0 && <p className="text-muted">급여 금액이 없습니다. 설정에서 급여일과 금액을 넣으면 여기에 더합니다.</p>}
+        {forecast.recurringPending.map((item) => (
+          <Line
+            key={item.id}
+            label={`${item.name} · ${recurringDayText(item.dayOfMonth)}${item.variable ? (item.fromPreviousMonth ? " · 지난달 금액" : item.amount === 0 ? " · 예상 금액 없음" : " · 이번 달 예상") : ""}`}
+            value={-item.amount}
+          />
+        ))}
+        {bills.map((card) => (
+          <Line
+            key={card.id}
+            label={
+              <span className="inline-flex items-center gap-2">
+                <CardThumb name={card.name} color={card.color} size="sm" />
+                {card.name} · {card.paymentMonth}월 {card.paymentDay}일 출금
+              </span>
+            }
+            value={-card.billAmount}
+          />
+        ))}
+        <div className="flex items-center justify-between border-t border-line pt-3 text-base font-semibold">
+          <dt>남는 돈</dt>
+          <dd className="tabular">{won(forecast.expectedBalance)}</dd>
+        </div>
+      </dl>
+      {upcoming.length > 0 && (
+        <div className="mt-4 space-y-2 text-sm text-muted">
+          {upcoming.map((card) => (
+            <p key={card.id} className="flex items-center gap-2">
+              <CardThumb name={card.name} color={card.color} size="sm" />
+              <span>
+                {card.name} {won(card.usageThisMonth)}은 {formatKoreanYmd(card.openPayment)}에 나갑니다. 이번 달 남는 돈에서는 빼지 않습니다.
+              </span>
+            </p>
+          ))}
+        </div>
+      )}
     </section>
   );
 }

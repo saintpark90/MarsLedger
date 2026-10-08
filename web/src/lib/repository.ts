@@ -235,6 +235,9 @@ export async function saveRecurring(item: Recurring): Promise<void> {
     category_id: item.categoryId,
     account_id: item.accountId,
     enabled: item.enabled,
+    sort_order: item.sort ?? 0,
+    reference_merchant: item.referenceMerchant ?? null,
+    reference_transaction_id: item.referenceTransactionId ?? null,
   });
   if (error) throw new Error(recurringAccountError(error));
 }
@@ -254,8 +257,9 @@ export async function saveRecurringMark(mark: RecurringMark): Promise<void> {
     year: mark.year,
     month: mark.month,
     settled: mark.settled,
+    amount: mark.amount ?? null,
   });
-  if (error) throw new Error(explainError(error));
+  if (error) throw new Error(recurringAccountError(error));
 }
 
 export async function deleteRecurringMark(recurringId: string, year: number, month: number): Promise<void> {
@@ -284,6 +288,7 @@ export async function saveCard(card: CreditCard): Promise<void> {
     period_end_offset: card.periodEndOffset,
     period_end_day: card.periodEndDay,
     payment_offset: card.paymentOffset,
+    sort_order: card.sort ?? 0,
   });
   if (error) throw new Error(cardCycleError(error));
 }
@@ -341,11 +346,13 @@ export async function saveCardMark(mark: CardMark): Promise<void> {
   if (error) throw new Error(explainError(error));
 }
 
-export async function deleteSalary(year: number, month: number): Promise<void> {
+export async function deleteSalary(year: number, month: number, day?: number): Promise<void> {
   const client = requiredClient();
   const userId = await userIdOf(client);
-  const { error } = await client.from("salary_entries").delete().eq("user_id", userId).eq("year", year).eq("month", month);
-  if (error) throw new Error(explainError(error));
+  let query = client.from("salary_entries").delete().eq("user_id", userId).eq("year", year).eq("month", month);
+  if (day != null) query = query.eq("day_of_month", day);
+  const { error } = await query;
+  if (error) throw new Error(salaryError(error));
 }
 
 export async function saveSalary(salary: Salary): Promise<void> {
@@ -357,18 +364,30 @@ export async function saveSalary(salary: Salary): Promise<void> {
       user_id: userId,
       year: salary.year,
       month: salary.month,
+      day_of_month: salary.day ?? 25,
       amount: salary.amount,
       received: salary.received,
     },
-    { onConflict: "user_id,year,month" },
+    { onConflict: "user_id,year,month,day_of_month" },
   );
-  if (error) throw new Error(explainError(error));
+  if (error) throw new Error(salaryError(error));
 }
 
 function recurringAccountError(error: { message?: string; code?: string }): string {
   const message = `${error.message ?? ""} ${error.code ?? ""}`;
-  if (/account_id|schema cache|PGRST204/i.test(message)) {
+  if (/sort_order|reference_merchant|reference_transaction|amount >= 0|recurring_marks.*amount|schema cache|PGRST204/i.test(message)) {
+    return "변동 자동이체와 순서를 쓰려면 Supabase SQL Editor에서 supabase/migrations/20261008160000_variable_order.sql 을 실행해 주세요.";
+  }
+  if (/account_id/i.test(message)) {
     return "자동이체 통장을 쓰려면 Supabase SQL Editor에서 supabase/migrations/20261007120000_recurring_account.sql 을 실행해 주세요.";
+  }
+  return explainError(error);
+}
+
+function salaryError(error: { message?: string; code?: string }): string {
+  const message = `${error.message ?? ""} ${error.code ?? ""}`;
+  if (/day_of_month|salary_entries_user_month_day|schema cache|PGRST204/i.test(message)) {
+    return "급여일을 여러 개 쓰려면 Supabase SQL Editor에서 supabase/migrations/20261008160000_variable_order.sql 을 실행해 주세요.";
   }
   return explainError(error);
 }
@@ -512,6 +531,9 @@ function mapTransaction(row: Row): Transaction {
 
 function cardCycleError(error: { message?: string; code?: string }): string {
   const message = `${error.message ?? ""} ${error.code ?? ""}`;
+  if (/sort_order/i.test(message)) {
+    return "카드 순서를 쓰려면 Supabase SQL Editor에서 supabase/migrations/20261008160000_variable_order.sql 을 실행해 주세요.";
+  }
   if (/period_start_offset|period_end_offset|payment_offset|schema cache|PGRST204/i.test(message)) {
     return "카드 이용기간을 쓰려면 Supabase SQL Editor에서 supabase/migrations/20261008000000_card_cycle.sql 을 실행해 주세요.";
   }
@@ -531,6 +553,7 @@ function mapCard(row: Row): CreditCard {
     periodEndOffset: finiteNumber(row.period_end_offset, defaultCardCycle.periodEndOffset),
     periodEndDay: finiteNumber(row.period_end_day, defaultCardCycle.periodEndDay),
     paymentOffset: finiteNumber(row.payment_offset, defaultCardCycle.paymentOffset),
+    sort: row.sort_order == null ? undefined : Number(row.sort_order),
   };
 }
 
@@ -561,6 +584,9 @@ function mapRecurring(row: Row): Recurring {
     categoryId: (row.category_id as string | null) ?? null,
     accountId: (row.account_id as string | null) ?? null,
     enabled: Boolean(row.enabled),
+    sort: row.sort_order == null ? undefined : Number(row.sort_order),
+    referenceMerchant: (row.reference_merchant as string | null) ?? null,
+    referenceTransactionId: (row.reference_transaction_id as string | null) ?? null,
   };
 }
 
@@ -569,6 +595,7 @@ function mapSalary(row: Row): Salary {
     id: String(row.id),
     year: Number(row.year),
     month: Number(row.month),
+    day: row.day_of_month == null ? undefined : Number(row.day_of_month),
     amount: Number(row.amount),
     received: Boolean(row.received),
   };
@@ -579,7 +606,8 @@ function mapRecurringMark(row: Row): RecurringMark {
     recurringId: String(row.recurring_id),
     year: Number(row.year),
     month: Number(row.month),
-    settled: Boolean(row.settled),
+    settled: row.settled == null ? null : Boolean(row.settled),
+    amount: row.amount == null ? null : Number(row.amount),
   };
 }
 
