@@ -6,8 +6,10 @@ import { clampDay, formatKoreanDate, formatSeoulTime, parseAmountInput, seoulDat
 import { planInstallment } from "../lib/installment";
 import { shortMerchant } from "../lib/parseNotification";
 import type { BankAccount, Category, CreditCard, Direction, PayMethod, Transaction } from "../lib/types";
+import { CategoryMark } from "../components/CategoryMark";
+import { IconSelect, type IconOption } from "../components/IconSelect";
 import { StatementImport } from "../components/StatementImport";
-import { AccountField, AccountThumb, CardThumb, LedgerThumb } from "../components/Thumbs";
+import { AccountThumb, CardThumb, LedgerThumb } from "../components/Thumbs";
 import { Button, Field, SelectInput, TextInput } from "../components/Ui";
 
 const methods: { value: PayMethod; label: string }[] = [
@@ -166,12 +168,14 @@ export function TransactionsPage() {
           전체
         </CategoryChip>
         {categoryChoices.known.map((category) => (
-          <CategoryChip key={category.id} active={categoryFilter === category.id} color={category.color} onClick={() => setCategoryFilter(category.id)}>
+          <CategoryChip key={category.id} active={categoryFilter === category.id} onClick={() => setCategoryFilter(category.id)}>
+            <CategoryMark name={category.name} color={category.color} />
             {category.name}
           </CategoryChip>
         ))}
         {categoryChoices.uncategorized && (
-          <CategoryChip active={categoryFilter === "none"} color="#6f685e" onClick={() => setCategoryFilter("none")}>
+          <CategoryChip active={categoryFilter === "none"} onClick={() => setCategoryFilter("none")}>
+            <CategoryMark name="미분류" />
             미분류
           </CategoryChip>
         )}
@@ -181,7 +185,9 @@ export function TransactionsPage() {
         <section key={day}>
           <h3 className="mb-2 text-sm text-muted">{formatKoreanDate(rows[0].occurredAt)}</h3>
           <ul className="sheet divide-y divide-line">
-            {rows.map((transaction) => (
+            {rows.map((transaction) => {
+              const category = ledger.snap.categories.find((item) => item.id === transaction.categoryId);
+              return (
               <li key={transaction.id}>
                 <button className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left" onClick={() => setOpenId(openId === transaction.id ? null : transaction.id)}>
                   <span className="flex min-w-0 items-center gap-3">
@@ -191,8 +197,8 @@ export function TransactionsPage() {
                     <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-sm text-muted">
                       <span className="tabular">{formatSeoulTime(transaction.occurredAt)}</span>
                       {" · "}
-                      <CategoryDot category={ledger.snap.categories.find((category) => category.id === transaction.categoryId)} />
-                      {ledger.snap.categories.find((category) => category.id === transaction.categoryId)?.name ?? "미분류"}
+                      <CategoryMark name={category?.name ?? "미분류"} color={category?.color} />
+                      {category?.name ?? "미분류"}
                       {" · "}
                       {sourceLabel(transaction, ledger.snap.accounts, ledger.snap.cards)}
                       {installmentLabel(transaction) ? ` · ${installmentLabel(transaction)}` : ""}
@@ -210,7 +216,8 @@ export function TransactionsPage() {
                   </div>
                 )}
               </li>
-            ))}
+              );
+            })}
           </ul>
         </section>
       ))}
@@ -284,31 +291,7 @@ function ManualForm({ onClose }: { onClose: () => void }) {
         </SelectInput>
       </Field>
       <Field label="소비수단">
-        <div className="flex items-center gap-2">
-          {picked?.kind === "card" && <CardThumb name={picked.card.name} color={picked.card.color} size="sm" />}
-          {picked?.kind === "account" && <AccountThumb name={picked.account.name} bankName={picked.account.bankName} size="sm" />}
-          <SelectInput className="min-w-0 flex-1" value={source} onChange={(event) => setSource(event.target.value)}>
-            <option value="">카드 또는 계좌 선택</option>
-            {ledger.snap.cards.length > 0 && (
-              <optgroup label="카드">
-                {ledger.snap.cards.map((item) => (
-                  <option key={item.id} value={`card:${item.id}`}>
-                    {item.name}
-                  </option>
-                ))}
-              </optgroup>
-            )}
-            {ledger.snap.accounts.length > 0 && (
-              <optgroup label="계좌">
-                {ledger.snap.accounts.map((item) => (
-                  <option key={item.id} value={`account:${item.id}`}>
-                    {accountLabel(item)}
-                  </option>
-                ))}
-              </optgroup>
-            )}
-          </SelectInput>
-        </div>
+        <IconSelect label="소비수단" value={source} onChange={setSource} options={spendOptions(ledger.snap.cards, ledger.snap.accounts, "카드 또는 계좌 선택")} />
       </Field>
       <Field label="시각">
         <TextInput type="datetime-local" value={when} onChange={(event) => setWhen(event.target.value)} />
@@ -369,41 +352,13 @@ function TransactionEditor({ transaction }: { transaction: Transaction }) {
           <TextInput value={merchant} onChange={(event) => setMerchant(event.target.value)} />
         </Field>
         <Field label="카테고리">
-          <SelectInput value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>
-            <option value="">미분류</option>
-            {ledger.snap.categories.map((category) => (
-              <option key={category.id} value={category.id}>
-                {category.name}
-              </option>
-            ))}
-          </SelectInput>
+          <IconSelect label="카테고리" value={categoryId} onChange={setCategoryId} options={categoryOptions(ledger.snap.categories)} />
         </Field>
         <Field label="소비수단">
-          <SelectInput value={source} onChange={(event) => setSource(event.target.value)}>
-            <option value="">그대로</option>
-            {ledger.snap.cards.map((item) => (
-              <option key={item.id} value={`card:${item.id}`}>
-                {item.name}
-              </option>
-            ))}
-            {ledger.snap.accounts.map((item) => (
-              <option key={item.id} value={`account:${item.id}`}>
-                {accountLabel(item)}
-              </option>
-            ))}
-          </SelectInput>
+          <IconSelect label="소비수단" value={source} onChange={setSource} options={spendOptions(ledger.snap.cards, ledger.snap.accounts, "그대로")} />
         </Field>
         <Field label="통장">
-          <AccountField accounts={ledger.snap.accounts} accountId={accountId || resolveAccount(transaction, ledger.snap.accounts)?.id || ""}>
-            <SelectInput value={accountId} onChange={(event) => setAccountId(event.target.value)}>
-              <option value="">자동</option>
-              {ledger.snap.accounts.map((account) => (
-                <option key={account.id} value={account.id}>
-                  {accountLabel(account)}
-                </option>
-              ))}
-            </SelectInput>
-          </AccountField>
+          <IconSelect label="통장" value={accountId} onChange={setAccountId} options={accountOptions(ledger.snap.accounts)} />
         </Field>
       </div>
       <div className="flex flex-wrap gap-2">
@@ -431,31 +386,56 @@ function TransactionEditor({ transaction }: { transaction: Transaction }) {
   );
 }
 
-function CategoryDot({ category }: { category?: Category }) {
-  return <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: category?.color ?? "#6f685e" }} />;
-}
-
-function CategoryChip({
-  active,
-  color,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  color?: string;
-  onClick: () => void;
-  children: ReactNode;
-}) {
+function CategoryChip({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
   return (
     <button
       type="button"
       onClick={onClick}
       className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm ${active ? "bg-ink text-sheet" : "border border-line bg-white text-ink"}`}
     >
-      {color && <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: color }} />}
       {children}
     </button>
   );
+}
+
+function categoryOptions(categories: Category[]): IconOption[] {
+  return [
+    { value: "", label: "미분류", icon: <CategoryMark name="미분류" /> },
+    ...categories.map((category) => ({
+      value: category.id,
+      label: category.name,
+      icon: <CategoryMark name={category.name} color={category.color} />,
+    })),
+  ];
+}
+
+function spendOptions(cards: CreditCard[], accounts: BankAccount[], emptyLabel: string): IconOption[] {
+  return [
+    { value: "", label: emptyLabel },
+    ...cards.map((card) => ({
+      value: `card:${card.id}`,
+      label: card.name,
+      group: "카드",
+      icon: <CardThumb name={card.name} color={card.color} size="xs" />,
+    })),
+    ...accounts.map((account) => ({
+      value: `account:${account.id}`,
+      label: accountLabel(account),
+      group: "계좌",
+      icon: <AccountThumb name={account.name} bankName={account.bankName} size="xs" />,
+    })),
+  ];
+}
+
+function accountOptions(accounts: BankAccount[]): IconOption[] {
+  return [
+    { value: "", label: "자동" },
+    ...accounts.map((account) => ({
+      value: account.id,
+      label: accountLabel(account),
+      icon: <AccountThumb name={account.name} bankName={account.bankName} size="xs" />,
+    })),
+  ];
 }
 
 function monthBounds(monthKey: string): { start: string; end: string } {

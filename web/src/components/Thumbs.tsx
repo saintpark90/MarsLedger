@@ -3,7 +3,7 @@ import { resolveAccount, transactionBank } from "../lib/accounts";
 import { accountMark, cardMark, type Mark } from "../lib/marks";
 import type { BankAccount, CreditCard, Transaction } from "../lib/types";
 
-type Size = "sm" | "md";
+type Size = "xs" | "sm" | "md";
 
 export function AccountThumb({
   name,
@@ -69,7 +69,8 @@ export function AccountField({
 }
 
 function Thumb({ mark, size }: { mark: Mark; size: Size }) {
-  const box = size === "sm" ? "size-7 rounded-lg text-[9px]" : "size-10 rounded-xl text-[11px]";
+  const box =
+    size === "xs" ? "size-5 rounded-md text-[8px]" : size === "sm" ? "size-7 rounded-lg text-[9px]" : "size-10 rounded-xl text-[11px]";
   if (mark.icon) {
     return <img alt="" src={mark.icon} className={`inline-block shrink-0 bg-white object-cover ring-1 ring-black/10 ${box}`} />;
   }
