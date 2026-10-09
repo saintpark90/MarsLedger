@@ -7,7 +7,7 @@ import { resolveCategoryId } from "./classify";
 import { buildForecast, recurringAmount } from "./forecast";
 import { clampDay } from "./format";
 import { accountMark, cardMark } from "./marks";
-import { parseNotification } from "./parseNotification";
+import { parseNotification, shortMerchant } from "./parseNotification";
 import type { BankAccount, Category, CreditCard, Rule, Transaction } from "./types";
 
 const catalog: Category[] = categories.map((category, index) => ({
@@ -111,6 +111,22 @@ describe("parseNotification", () => {
 
   it("ignores ordinary notifications", () => {
     expect(parseNotification("카카오톡 새 메시지가 도착했습니다")).toBeNull();
+  });
+
+  it("keeps only the store name from a repeated card notification", () => {
+    const parsed = parseNotification(
+      "현대카드 승인 박성현 현대 네이버 박성현 현대 네이버 몬스터커피대전도안우미린점 4,500원 누적867,130원",
+    );
+    expect(parsed).toMatchObject({
+      amount: 4500,
+      merchant: "몬스터커피대전도안우미린점",
+      direction: "expense",
+      method: "credit",
+      instrument: "현대카드",
+    });
+    expect(shortMerchant("박성현 현대 네이버 박성현 현대 네이버 몬스터커피대전도안우미린점 누적867")).toBe(
+      "몬스터커피대전도안우미린점",
+    );
   });
 
   it("reads a kakaobank deposit that leaves the bank name off the text", () => {

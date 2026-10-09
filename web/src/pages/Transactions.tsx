@@ -1,11 +1,11 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useLedger, type NewTransaction } from "../context/LedgerContext";
 import { accountLabel, mainAccount, resolveAccount, transactionBank } from "../lib/accounts";
 import { parseNotification } from "../lib/parseNotification";
-import { formatKoreanDate, monthLabel, parseAmountInput, seoulDateKey, seoulParts, won } from "../lib/format";
+import { clampDay, formatKoreanDate, parseAmountInput, seoulDateKey, seoulParts, shiftYmd, won, ymdKey } from "../lib/format";
 import { planInstallment } from "../lib/installment";
-import { monthOptions } from "../lib/analytics";
-import type { BankAccount, CreditCard, Direction, PayMethod, Transaction } from "../lib/types";
+import { shortMerchant } from "../lib/parseNotification";
+import type { BankAccount, Category, CreditCard, Direction, PayMethod, Transaction } from "../lib/types";
 import { StatementImport } from "../components/StatementImport";
 import { AccountField, AccountThumb, CardThumb, LedgerThumb } from "../components/Thumbs";
 import { Button, Field, SelectInput, TextInput } from "../components/Ui";
@@ -19,23 +19,40 @@ const methods: { value: PayMethod; label: string }[] = [
 
 export function TransactionsPage() {
   const ledger = useLedger();
-  const today = seoulParts();
-  const [month, setMonth] = useState(`${today.year}-${today.month}`);
+  const [from, setFrom] = useState(() => ymdKey(shiftYmd(seoulParts(), -1)));
+  const [to, setTo] = useState(() => ymdKey(seoulParts()));
+  const [categoryFilter, setCategoryFilter] = useState("all");
   const [openId, setOpenId] = useState<string | null>(null);
   const [showManual, setShowManual] = useState(false);
   const [raw, setRaw] = useState("");
-  const options = monthOptions(ledger.snap.transactions, today);
+
+  const inRange = useMemo(() => {
+    const start = from && to && from > to ? to : from;
+    const end = from && to && from > to ? from : to;
+    return ledger.snap.transactions.filter((transaction) => {
+      const key = seoulDateKey(transaction.occurredAt);
+      if (start && key < start) return false;
+      if (end && key > end) return false;
+      return true;
+    });
+  }, [ledger.snap.transactions, from, to]);
+
+  const categoryChoices = useMemo(() => {
+    const ids = new Set(inRange.map((transaction) => transaction.categoryId ?? "none"));
+    const known = ledger.snap.categories.filter((category) => ids.has(category.id));
+    const uncategorized = ids.has("none");
+    return { known, uncategorized };
+  }, [inRange, ledger.snap.categories]);
 
   const visible = useMemo(() => {
-    return [...ledger.snap.transactions]
+    return [...inRange]
       .filter((transaction) => {
-        if (month === "all") return true;
-        const [year, monthNumber] = month.split("-").map(Number);
-        const key = seoulDateKey(transaction.occurredAt);
-        return key.startsWith(`${year}-${String(monthNumber).padStart(2, "0")}`);
+        if (categoryFilter === "all") return true;
+        if (categoryFilter === "none") return !transaction.categoryId;
+        return transaction.categoryId === categoryFilter;
       })
       .sort((a, b) => +new Date(b.occurredAt) - +new Date(a.occurredAt));
-  }, [ledger.snap.transactions, month]);
+  }, [inRange, categoryFilter]);
 
   const groups = new Map<string, Transaction[]>();
   for (const transaction of visible) {
@@ -103,14 +120,14 @@ export function TransactionsPage() {
           <h2 className="text-2xl font-semibold">내역</h2>
           <p className="text-sm text-muted">휴대폰 알림, 직접 입력, 카드 명세서가 같은 장부에 모입니다.</p>
         </div>
-        <SelectInput className="w-auto" value={month} onChange={(event) => setMonth(event.target.value)}>
-          <option value="all">전체 기간</option>
-          {options.map((option) => (
-            <option key={`${option.year}-${option.month}`} value={`${option.year}-${option.month}`}>
-              {monthLabel(option.year, option.month)}
-            </option>
-          ))}
-        </SelectInput>
+        <div className="flex flex-wrap items-end gap-2">
+          <Field label="시작">
+            <TextInput type="date" value={from} onChange={(event) => setFrom(event.target.value)} />
+          </Field>
+          <Field label="끝">
+            <TextInput type="date" value={to} onChange={(event) => setTo(event.target.value)} />
+          </Field>
+        </div>
       </div>
 
       <section className="sheet space-y-3 p-4">
@@ -135,13 +152,30 @@ export function TransactionsPage() {
 
       <StatementImport
         onImported={(months) => {
-          if (month === "all") return;
-          const [year, monthNumber] = month.split("-").map(Number);
-          const current = `${year}-${String(monthNumber).padStart(2, "0")}`;
-          if (months.every((item) => item === current)) return;
-          setMonth("all");
+          const bounds = months.filter(Boolean).map(monthBounds);
+          if (bounds.length === 0) return;
+          const earliest = bounds.reduce((min, item) => (item.start < min ? item.start : min), bounds[0].start);
+          const latest = bounds.reduce((max, item) => (item.end > max ? item.end : max), bounds[0].end);
+          setFrom((current) => (current && current < earliest ? current : earliest));
+          setTo((current) => (current && current > latest ? current : latest));
         }}
       />
+
+      <div className="flex flex-wrap gap-2">
+        <CategoryChip active={categoryFilter === "all"} onClick={() => setCategoryFilter("all")}>
+          전체
+        </CategoryChip>
+        {categoryChoices.known.map((category) => (
+          <CategoryChip key={category.id} active={categoryFilter === category.id} color={category.color} onClick={() => setCategoryFilter(category.id)}>
+            {category.name}
+          </CategoryChip>
+        ))}
+        {categoryChoices.uncategorized && (
+          <CategoryChip active={categoryFilter === "none"} color="#6f685e" onClick={() => setCategoryFilter("none")}>
+            미분류
+          </CategoryChip>
+        )}
+      </div>
 
       {[...groups.entries()].map(([day, rows]) => (
         <section key={day}>
@@ -153,8 +187,9 @@ export function TransactionsPage() {
                   <span className="flex min-w-0 items-center gap-3">
                     <LedgerThumb transaction={transaction} accounts={ledger.snap.accounts} cards={ledger.snap.cards} />
                     <span className="min-w-0">
-                    <span className="block font-medium">{transaction.merchant}</span>
-                    <span className="text-sm text-muted">
+                    <span className="block truncate font-medium">{shortMerchant(transaction.merchant)}</span>
+                    <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-sm text-muted">
+                      <CategoryDot category={ledger.snap.categories.find((category) => category.id === transaction.categoryId)} />
                       {ledger.snap.categories.find((category) => category.id === transaction.categoryId)?.name ?? "미분류"}
                       {" · "}
                       {sourceLabel(transaction, ledger.snap.accounts, ledger.snap.cards)}
@@ -162,12 +197,16 @@ export function TransactionsPage() {
                     </span>
                     </span>
                   </span>
-                  <span className={`tabular font-medium ${transaction.direction === "income" ? "text-pine" : "text-ink"}`}>
+                  <span className={`tabular shrink-0 font-medium ${transaction.direction === "income" ? "text-pine" : "text-ink"}`}>
                     {transaction.direction === "income" ? "+" : transaction.direction === "refund" ? "−" : ""}
                     {won(transaction.amount)}
                   </span>
                 </button>
-                {openId === transaction.id && <TransactionEditor transaction={transaction} />}
+                {openId === transaction.id && (
+                  <div className="border-t border-line bg-paper py-3 pr-4 pl-8 sm:pl-12">
+                    <TransactionEditor transaction={transaction} />
+                  </div>
+                )}
               </li>
             ))}
           </ul>
@@ -301,13 +340,13 @@ function ManualForm({ onClose }: { onClose: () => void }) {
 
 function TransactionEditor({ transaction }: { transaction: Transaction }) {
   const ledger = useLedger();
-  const [merchant, setMerchant] = useState(transaction.merchant);
+  const [merchant, setMerchant] = useState(shortMerchant(transaction.merchant));
   const [categoryId, setCategoryId] = useState(transaction.categoryId ?? "");
   const [accountId, setAccountId] = useState(transaction.accountId ?? "");
   const [source, setSource] = useState(initialSource(transaction));
   const bank = transactionBank(transaction);
   return (
-    <div className="space-y-3 border-t border-line px-4 py-3">
+    <div className="space-y-3">
       {transaction.rawText && <p className="text-sm text-muted">{transaction.rawText}</p>}
       {(bank || transaction.accountLast4 || transaction.instrument) && (
         <p className="flex items-center gap-2 text-sm text-muted">
@@ -388,6 +427,40 @@ function TransactionEditor({ transaction }: { transaction: Transaction }) {
       </div>
     </div>
   );
+}
+
+function CategoryDot({ category }: { category?: Category }) {
+  return <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: category?.color ?? "#6f685e" }} />;
+}
+
+function CategoryChip({
+  active,
+  color,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  color?: string;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm ${active ? "bg-ink text-sheet" : "border border-line bg-white text-ink"}`}
+    >
+      {color && <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: color }} />}
+      {children}
+    </button>
+  );
+}
+
+function monthBounds(monthKey: string): { start: string; end: string } {
+  const [year, month] = monthKey.split("-").map(Number);
+  const last = clampDay(year, month, 31);
+  const prefix = `${year}-${String(month).padStart(2, "0")}`;
+  return { start: `${prefix}-01`, end: `${prefix}-${String(last).padStart(2, "0")}` };
 }
 
 function sourceLabel(transaction: Transaction, accounts: BankAccount[], cards: CreditCard[]): string {

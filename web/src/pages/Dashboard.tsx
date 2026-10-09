@@ -5,6 +5,7 @@ import { cardsPaidFrom, mainAccount, recurringForAccount, resolveAccount, transa
 import { categoryBreakdown } from "../lib/analytics";
 import { buildForecast, type Forecast } from "../lib/forecast";
 import { formatKoreanDateTime, formatKoreanYmd, monthLabel, recurringDayText, seoulParts, won } from "../lib/format";
+import { shortMerchant } from "../lib/parseNotification";
 import { bySort } from "../lib/order";
 import { AccountThumb, CardThumb, LedgerThumb } from "../components/Thumbs";
 import { Button, Signed } from "../components/Ui";
@@ -117,7 +118,7 @@ export function Dashboard() {
                 <div className="flex min-w-0 items-center gap-3">
                   <LedgerThumb transaction={transaction} accounts={snap.accounts} cards={snap.cards} />
                   <div>
-                  <p className="font-medium">{transaction.merchant}</p>
+                  <p className="truncate font-medium">{shortMerchant(transaction.merchant)}</p>
                   <p className="text-muted">
                     {formatKoreanDateTime(transaction.occurredAt)} · {category?.name ?? "미분류"}
                   </p>
@@ -148,18 +149,16 @@ function AccountForecast({
   const bills = forecast.cardLines.filter((card) => card.pending && card.billAmount !== 0);
   return (
     <section className="sheet p-5 md:p-7">
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <AccountThumb name={accountName} bankName={bankName} />
-          <div>
-            <h2 className="text-lg font-semibold">
-              {accountName}
-              {isMain ? " · 메인" : ""}
-            </h2>
-            <p className="text-sm text-muted">이번 달 정산 후</p>
-          </div>
+      <div className="flex items-start gap-3">
+        <AccountThumb name={accountName} bankName={bankName} />
+        <div className="min-w-0">
+          <h2 className="text-sm font-medium text-muted">
+            {accountName}
+            {isMain ? " · 메인" : ""}
+          </h2>
+          <p className="tabular mt-1 text-3xl font-semibold tracking-tight md:text-4xl">{won(forecast.expectedBalance)}</p>
+          <p className="mt-1 text-sm text-muted">이번 달 정산 후</p>
         </div>
-        <p className="tabular text-3xl font-semibold md:text-4xl">{won(forecast.expectedBalance)}</p>
       </div>
       <dl className="mt-4 space-y-3 text-sm">
         <Line label="현재 잔액" value={forecast.balance} plain />

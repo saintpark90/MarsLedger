@@ -67,6 +67,25 @@ const NOISE = [
   ...INSTRUMENTS.map((item) => item.name),
 ];
 
+export function shortMerchant(raw: string): string {
+  const text = raw
+    .replace(/\s+/g, " ")
+    .replace(/누적\s*[\d,]+(?:\s*원)?/g, " ")
+    .replace(/(^|\s)원(?=\s|$)/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const tokens = text.split(" ").filter((token) => token && token !== "원");
+  for (let size = Math.floor(tokens.length / 2); size >= 2; size -= 1) {
+    const head = tokens.slice(0, size).join(" ");
+    if (tokens.slice(size, size * 2).join(" ") !== head) continue;
+    let rest = tokens.slice(size);
+    while (rest.length >= size && rest.slice(0, size).join(" ") === head) rest = rest.slice(size);
+    const next = rest.join(" ").trim();
+    if (next) return next;
+  }
+  return text;
+}
+
 export function last4FromText(raw: string): string | null {
   const text = raw.replace(/\s+/g, " ");
   const patterns = [
@@ -136,13 +155,15 @@ export function parseNotification(raw: string): ParsedNotification | null {
   for (const word of noise) {
     merchantSource = merchantSource.split(word).join(" ");
   }
+  merchantSource = merchantSource.replace(/누적\s*[\d,]+(?:\s*원)?/g, " ");
+  merchantSource = merchantSource.replace(/[\d,]+\s*원/g, " ");
   merchantSource = merchantSource.replace(/[()[\]{}<>★*·|,/:._+＋→-]/g, " ");
   merchantSource = merchantSource.replace(/\s+/g, " ").trim();
 
   const direction: Direction = isRefund ? "refund" : isIncome ? "income" : "expense";
   return {
     amount,
-    merchant: merchantSource || "알 수 없는 사용처",
+    merchant: shortMerchant(merchantSource) || "알 수 없는 사용처",
     direction,
     method,
     instrument,

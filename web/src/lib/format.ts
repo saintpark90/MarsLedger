@@ -35,6 +35,17 @@ export function previousMonth(year: number, month: number): { year: number; mont
   return { year, month: month - 1 };
 }
 
+export function shiftYmd(parts: YMD, months: number): YMD {
+  const date = new Date(parts.year, parts.month - 1 + months, 1);
+  const year = date.getFullYear();
+  const month = date.getMonth() + 1;
+  return { year, month, day: clampDay(year, month, parts.day) };
+}
+
+export function ymdKey(parts: YMD): string {
+  return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
+}
+
 export function clampDay(year: number, month: number, day: number): number {
   const last = new Date(year, month, 0).getDate();
   return Math.min(Math.max(1, day), last);

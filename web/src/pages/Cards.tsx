@@ -8,6 +8,7 @@ import { accountLabel, mainAccount } from "../lib/accounts";
 import { MONTH_OFFSETS, cycleForDate, cycleOrderValid, defaultCardCycle, offsetLabel, usageRows } from "../lib/cardCycle";
 import { buildForecast } from "../lib/forecast";
 import { formatKoreanYmd, parseAmountInput, seoulDateKey, seoulParts, won } from "../lib/format";
+import { shortMerchant } from "../lib/parseNotification";
 import type { CreditCard, Transaction, YMD } from "../lib/types";
 
 export function CardsPage() {
@@ -373,13 +374,16 @@ function UsageSheet({
               <tbody>
                 {rows.map((row) => {
                   const amount = signedAmount(row);
-                  const category = ledger.snap.categories.find((item) => item.id === row.categoryId)?.name ?? "미분류";
+                  const category = ledger.snap.categories.find((item) => item.id === row.categoryId);
                   return (
                     <tr key={row.id} className="odd:bg-white">
                       <td className="border border-line px-2 py-1.5 tabular whitespace-nowrap">{seoulDateKey(row.occurredAt)}</td>
-                      <td className="border border-line px-2 py-1.5">{row.merchant}</td>
+                      <td className="border border-line px-2 py-1.5">{shortMerchant(row.merchant)}</td>
                       <td className="border border-line px-2 py-1.5 whitespace-nowrap">{row.direction === "refund" ? "취소" : "지출"}</td>
-                      <td className="border border-line px-2 py-1.5 whitespace-nowrap">{category}</td>
+                      <td className="border border-line px-2 py-1.5 whitespace-nowrap">
+                        <span className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: category?.color ?? "#6f685e" }} />
+                        {category?.name ?? "미분류"}
+                      </td>
                       {showInstallment && <td className="border border-line px-2 py-1.5 tabular">{installmentOf(row)}</td>}
                       <td className={`border border-line px-2 py-1.5 text-right tabular ${amount < 0 ? "text-pine" : ""}`}>{won(amount)}</td>
                     </tr>
