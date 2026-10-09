@@ -8,7 +8,7 @@ import { accountLabel, mainAccount } from "../lib/accounts";
 import { MONTH_OFFSETS, cycleForDate, cycleOrderValid, defaultCardCycle, offsetLabel, usageRows } from "../lib/cardCycle";
 import { buildForecast } from "../lib/forecast";
 import { formatKoreanYmd, parseAmountInput, seoulDateKey, seoulParts, won } from "../lib/format";
-import { shortMerchant } from "../lib/parseNotification";
+import { merchantLabel } from "../lib/parseNotification";
 import type { CreditCard, Transaction, YMD } from "../lib/types";
 
 export function CardsPage() {
@@ -378,7 +378,7 @@ function UsageSheet({
                   return (
                     <tr key={row.id} className="odd:bg-white">
                       <td className="border border-line px-2 py-1.5 tabular whitespace-nowrap">{seoulDateKey(row.occurredAt)}</td>
-                      <td className="border border-line px-2 py-1.5">{shortMerchant(row.merchant)}</td>
+                      <td className="border border-line px-2 py-1.5">{merchantLabel(row.merchant, ledger.snap.accounts.find((item) => item.id === row.accountId)?.name)}</td>
                       <td className="border border-line px-2 py-1.5 whitespace-nowrap">{row.direction === "refund" ? "취소" : "지출"}</td>
                       <td className="border border-line px-2 py-1.5 whitespace-nowrap">
                         <span className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: category?.color ?? "#6f685e" }} />

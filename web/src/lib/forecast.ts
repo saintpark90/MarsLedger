@@ -1,5 +1,6 @@
 import { compareYmd, cycleForDate, cyclePayingIn, usageBetween } from "./cardCycle";
 import { clampDay, inMonth, previousMonth } from "./format";
+import { shortMerchant } from "./parseNotification";
 import type { CardMark, CreditCard, Recurring, RecurringMark, Salary, Transaction, YMD } from "./types";
 
 export type ForecastSalary = {
@@ -70,7 +71,12 @@ export function buildForecast(input: {
 
   const recurringPending = recurring
     .filter((item) => item.enabled)
-    .filter((item) => stillDue(item, today, recurringMarks))
+    .filter((item) => {
+      const mark = recurringMarks.find((entry) => entry.recurringId === item.id && entry.year === today.year && entry.month === today.month);
+      if (mark?.settled != null) return !mark.settled;
+      if (item.amount <= 0 && referencedAmount(item, today.year, today.month, transactions) != null) return false;
+      return stillDue(item, today, recurringMarks);
+    })
     .map((item) => {
       const priced = recurringAmount(item, today.year, today.month, recurringMarks, transactions);
       return {
@@ -142,6 +148,8 @@ export function recurringAmount(
   transactions: Transaction[],
 ): { amount: number; fromPreviousMonth: boolean } {
   if (item.amount > 0) return { amount: item.amount, fromPreviousMonth: false };
+  const currentSpend = referencedAmount(item, year, month, transactions);
+  if (currentSpend != null) return { amount: currentSpend, fromPreviousMonth: false };
   const current = marks.find((mark) => mark.recurringId === item.id && mark.year === year && mark.month === month);
   if (current?.amount != null) return { amount: current.amount, fromPreviousMonth: false };
   const prev = previousMonth(year, month);
@@ -149,6 +157,8 @@ export function recurringAmount(
   if (previous?.amount != null) return { amount: previous.amount, fromPreviousMonth: true };
   const referenced = referencedAmount(item, prev.year, prev.month, transactions);
   if (referenced != null) return { amount: referenced, fromPreviousMonth: true };
+  const picked = transactions.find((transaction) => transaction.id === item.referenceTransactionId && !transaction.excluded);
+  if (picked) return { amount: picked.amount, fromPreviousMonth: true };
   return { amount: 0, fromPreviousMonth: false };
 }
 
@@ -209,18 +219,21 @@ function compact(value: string): string {
   return value.replace(/\s+/g, "");
 }
 
+function placeKey(value: string): string {
+  return shortMerchant(value).replace(/\s+/g, "");
+}
+
 function referencedAmount(item: Recurring, year: number, month: number, transactions: Transaction[]): number | null {
   const named =
     item.referenceMerchant ?? transactions.find((transaction) => transaction.id === item.referenceTransactionId)?.merchant ?? "";
-  const merchant = named.replace(/\s+/g, "");
+  const merchant = placeKey(named);
   if (!merchant) return null;
   const matches = transactions.filter(
     (transaction) =>
       transaction.direction === "expense" &&
       !transaction.excluded &&
       inMonth(transaction.occurredAt, year, month) &&
-      transaction.merchant.replace(/\s+/g, "") === merchant,
+      placeKey(transaction.merchant) === merchant,
   );
-  if (matches.length === 0) return null;
-  return matches.reduce((sum, transaction) => sum + transaction.amount, 0);
+  return latestOf(matches)?.amount ?? null;
 }

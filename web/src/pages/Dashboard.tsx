@@ -5,7 +5,7 @@ import { cardsPaidFrom, mainAccount, recurringForAccount, resolveAccount, transa
 import { categoryBreakdown } from "../lib/analytics";
 import { buildForecast, type Forecast } from "../lib/forecast";
 import { formatKoreanDateTime, formatKoreanYmd, monthLabel, recurringDayText, seoulParts, won } from "../lib/format";
-import { shortMerchant } from "../lib/parseNotification";
+import { merchantLabel } from "../lib/parseNotification";
 import { bySort } from "../lib/order";
 import { AccountThumb, CardThumb, LedgerThumb } from "../components/Thumbs";
 import { Button, Signed } from "../components/Ui";
@@ -118,7 +118,7 @@ export function Dashboard() {
                 <div className="flex min-w-0 items-center gap-3">
                   <LedgerThumb transaction={transaction} accounts={snap.accounts} cards={snap.cards} />
                   <div>
-                  <p className="truncate font-medium">{shortMerchant(transaction.merchant)}</p>
+                  <p className="truncate font-medium">{merchantLabel(transaction.merchant, snap.accounts.find((item) => item.id === transaction.accountId)?.name)}</p>
                   <p className="text-muted">
                     {formatKoreanDateTime(transaction.occurredAt)} · {category?.name ?? "미분류"}
                   </p>

@@ -4,7 +4,7 @@ import { accountLabel, mainAccount, resolveAccount, transactionBank } from "../l
 import { parseNotification } from "../lib/parseNotification";
 import { clampDay, formatKoreanDate, formatSeoulTime, parseAmountInput, seoulDateKey, seoulParts, shiftYmd, won, ymdKey } from "../lib/format";
 import { planInstallment } from "../lib/installment";
-import { shortMerchant } from "../lib/parseNotification";
+import { merchantLabel } from "../lib/parseNotification";
 import type { BankAccount, Category, CreditCard, Direction, PayMethod, Transaction } from "../lib/types";
 import { CategoryMark } from "../components/CategoryMark";
 import { IconSelect, type IconOption } from "../components/IconSelect";
@@ -193,7 +193,7 @@ export function TransactionsPage() {
                   <span className="flex min-w-0 items-center gap-3">
                     <LedgerThumb transaction={transaction} accounts={ledger.snap.accounts} cards={ledger.snap.cards} />
                     <span className="min-w-0">
-                    <span className="block truncate font-medium">{shortMerchant(transaction.merchant)}</span>
+                    <span className="block truncate font-medium">{merchantLabel(transaction.merchant, ledger.snap.accounts.find((item) => item.id === transaction.accountId)?.name)}</span>
                     <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-sm text-muted">
                       <span className="tabular">{formatSeoulTime(transaction.occurredAt)}</span>
                       {" · "}
@@ -325,7 +325,9 @@ function ManualForm({ onClose }: { onClose: () => void }) {
 
 function TransactionEditor({ transaction }: { transaction: Transaction }) {
   const ledger = useLedger();
-  const [merchant, setMerchant] = useState(shortMerchant(transaction.merchant));
+  const [merchant, setMerchant] = useState(
+    merchantLabel(transaction.merchant, ledger.snap.accounts.find((item) => item.id === transaction.accountId)?.name),
+  );
   const [categoryId, setCategoryId] = useState(transaction.categoryId ?? "");
   const [accountId, setAccountId] = useState(transaction.accountId ?? "");
   const [source, setSource] = useState(initialSource(transaction));

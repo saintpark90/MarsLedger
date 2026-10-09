@@ -4,7 +4,7 @@ import { Button, SelectInput } from "../components/Ui";
 import { useLedger } from "../context/LedgerContext";
 import { categoryBreakdown, incomeOf, monthlyTrend, monthOptions, spendingOf, topMerchants } from "../lib/analytics";
 import { formatSeoulTime, inMonth, monthLabel, seoulDateKey, seoulParts, won } from "../lib/format";
-import { shortMerchant } from "../lib/parseNotification";
+import { merchantLabel } from "../lib/parseNotification";
 import type { Transaction } from "../lib/types";
 
 type Detail = {
@@ -238,7 +238,7 @@ function PatternSheet({ detail, onClose }: { detail: Detail; onClose: () => void
                       <td className="border border-line px-2 py-1.5 tabular whitespace-nowrap">
                         {seoulDateKey(row.occurredAt)} {formatSeoulTime(row.occurredAt)}
                       </td>
-                      <td className="border border-line px-2 py-1.5">{shortMerchant(row.merchant)}</td>
+                      <td className="border border-line px-2 py-1.5">{merchantLabel(row.merchant, ledger.snap.accounts.find((item) => item.id === row.accountId)?.name)}</td>
                       <td className="border border-line px-2 py-1.5 whitespace-nowrap">{directionLabel(row)}</td>
                       <td className="border border-line px-2 py-1.5 whitespace-nowrap">
                         <span className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: category?.color ?? "#6f685e" }} />

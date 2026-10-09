@@ -67,23 +67,72 @@ const NOISE = [
   ...INSTRUMENTS.map((item) => item.name),
 ];
 
+const ACCOUNT_TOKENS = new Set([
+  "모임통장",
+  "입출금통장",
+  "자유입출금",
+  "저금통",
+  "통장",
+  "입금",
+  "출금",
+  "이체",
+  "송금",
+  "승인",
+  "취소",
+  "체크",
+  "신용",
+  "체크카드",
+  "신용카드",
+  ...INSTRUMENTS.map((item) => item.name),
+]);
+
 export function shortMerchant(raw: string): string {
   const text = raw
     .replace(/\s+/g, " ")
+    .replace(/[()[\]{}<>]/g, " ")
     .replace(/누적\s*[\d,]+(?:\s*원)?/g, " ")
+    .replace(/[\d,]+\s*원/g, " ")
     .replace(/(^|\s)원(?=\s|$)/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-  const tokens = text.split(" ").filter((token) => token && token !== "원");
+  const tokens = collapseAdjacent(
+    text.split(" ").filter((token) => token && token !== "원" && !/^[\d,]+$/.test(token)),
+  );
+  const unwrapped = unwrapRepeatedPrefix(tokens);
+  const place = unwrapped.filter((token) => !ACCOUNT_TOKENS.has(token));
+  if (place.length > 0) return preferSpecificStore(place).join(" ");
+  return unwrapped[0] ?? "";
+}
+
+function preferSpecificStore(place: string[]): string[] {
+  const last = place[place.length - 1];
+  if (place.length >= 2 && last.length >= 12) return [last];
+  return place;
+}
+
+export function merchantLabel(merchant: string, accountName?: string | null): string {
+  const place = shortMerchant(merchant);
+  if (place && !ACCOUNT_TOKENS.has(place)) return place;
+  return accountName?.trim() || place || "이체";
+}
+
+function collapseAdjacent(tokens: string[]): string[] {
+  const result: string[] = [];
+  for (const token of tokens) {
+    if (result[result.length - 1] !== token) result.push(token);
+  }
+  return result;
+}
+
+function unwrapRepeatedPrefix(tokens: string[]): string[] {
   for (let size = Math.floor(tokens.length / 2); size >= 2; size -= 1) {
     const head = tokens.slice(0, size).join(" ");
     if (tokens.slice(size, size * 2).join(" ") !== head) continue;
     let rest = tokens.slice(size);
     while (rest.length >= size && rest.slice(0, size).join(" ") === head) rest = rest.slice(size);
-    const next = rest.join(" ").trim();
-    if (next) return next;
+    if (rest.length > 0) return rest;
   }
-  return text;
+  return tokens;
 }
 
 export function last4FromText(raw: string): string | null {

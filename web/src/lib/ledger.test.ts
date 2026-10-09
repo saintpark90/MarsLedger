@@ -7,7 +7,7 @@ import { resolveCategoryId } from "./classify";
 import { buildForecast, recurringAmount } from "./forecast";
 import { clampDay } from "./format";
 import { accountMark, cardMark } from "./marks";
-import { parseNotification, shortMerchant } from "./parseNotification";
+import { merchantLabel, parseNotification, shortMerchant } from "./parseNotification";
 import type { BankAccount, Category, CreditCard, Rule, Transaction } from "./types";
 
 const catalog: Category[] = categories.map((category, index) => ({
@@ -125,6 +125,20 @@ describe("parseNotification", () => {
       instrument: "현대카드",
     });
     expect(shortMerchant("박성현 현대 네이버 박성현 현대 네이버 몬스터커피대전도안우미린점 누적867")).toBe(
+      "몬스터커피대전도안우미린점",
+    );
+  });
+
+  it("shows only the store, or the account name when there is no store", () => {
+    expect(shortMerchant("모임통장 모임통장 7260 지에스더프레시 대전")).toBe("지에스더프레시 대전");
+    expect(shortMerchant("몬스터커피대전도안우미린점 130원")).toBe("몬스터커피대전도안우미린점");
+    expect(shortMerchant("모임통장 모임통장 7260 주식회사 레진엔터테인먼트")).toBe("주식회사 레진엔터테인먼트");
+    expect(shortMerchant("모임통장 모임통장 7260")).toBe("모임통장");
+    expect(merchantLabel("모임통장 모임통장 7260", "생활비통장")).toBe("생활비통장");
+    expect(merchantLabel("모임통장 모임통장 7260 몬스터커피대전도안우미린점 130원", "생활비통장")).toBe(
+      "몬스터커피대전도안우미린점",
+    );
+    expect(shortMerchant("모임통장 모임통장 7260 지에스더프레시 대전 몬스터커피대전도안우미린점 130원")).toBe(
       "몬스터커피대전도안우미린점",
     );
   });
@@ -391,6 +405,40 @@ describe("buildForecast", () => {
     });
     expect(forecast.recurringPending[0]).toMatchObject({ amount: 180_000, variable: true, fromPreviousMonth: true });
     expect(forecast.expectedBalance).toBe(820_000);
+  });
+
+  it("uses the next matching expense and stops counting it as still due", () => {
+    const item = {
+      id: "fee",
+      name: "관리비",
+      amount: 0,
+      dayOfMonth: 10,
+      categoryId: null,
+      accountId: null,
+      enabled: true,
+      referenceMerchant: "아파트관리비",
+    };
+    const older = tx("old", 180_000, "2026-09-10T03:00:00.000Z", null);
+    older.merchant = "아파트관리비";
+    const newer = tx("new", 192_000, "2026-10-08T03:00:00.000Z", null);
+    newer.merchant = "모임통장 모임통장 7260 아파트관리비 192,000원";
+    expect(recurringAmount(item, 2026, 10, [{ recurringId: "fee", year: 2026, month: 9, settled: null, amount: 150_000 }], [older, newer])).toEqual({
+      amount: 192_000,
+      fromPreviousMonth: false,
+    });
+    const forecast = buildForecast({
+      today: { year: 2026, month: 10, day: 8 },
+      balance: 1_000_000,
+      payday: 25,
+      salaries: [],
+      recurring: [item],
+      recurringMarks: [],
+      cards: [],
+      cardMarks: [],
+      transactions: [older, newer],
+    });
+    expect(forecast.recurringPending).toEqual([]);
+    expect(forecast.expectedBalance).toBe(1_000_000);
   });
 });
 
