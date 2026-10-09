@@ -75,6 +75,17 @@ export function formatKoreanDateTime(iso: string): string {
   }).format(new Date(iso));
 }
 
+export function formatSeoulTime(iso: string): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: SEOUL,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(iso));
+  const pick = (type: string) => parts.find((part) => part.type === type)?.value ?? "00";
+  return `${pick("hour")}:${pick("minute")}`;
+}
+
 export function monthLabel(year: number, month: number): string {
   return `${year}년 ${month}월`;
 }

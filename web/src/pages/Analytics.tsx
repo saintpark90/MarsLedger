@@ -1,9 +1,20 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Button, SelectInput } from "../components/Ui";
 import { useLedger } from "../context/LedgerContext";
 import { categoryBreakdown, incomeOf, monthlyTrend, monthOptions, spendingOf, topMerchants } from "../lib/analytics";
-import { inMonth, monthLabel, seoulParts, won } from "../lib/format";
-import { SelectInput } from "../components/Ui";
+import { formatSeoulTime, inMonth, monthLabel, seoulDateKey, seoulParts, won } from "../lib/format";
+import { shortMerchant } from "../lib/parseNotification";
+import type { Transaction } from "../lib/types";
+
+type Detail = {
+  title: string;
+  color?: string;
+  year: number;
+  month: number;
+  kind: "spending" | "income";
+  categoryId?: string;
+};
 
 export function AnalyticsPage() {
   const { snap } = useLedger();
@@ -11,6 +22,7 @@ export function AnalyticsPage() {
   const options = monthOptions(snap.transactions, today);
   const [selected, setSelected] = useState(`${today.year}-${today.month}`);
   const [year, month] = selected.split("-").map(Number);
+  const [detail, setDetail] = useState<Detail | null>(null);
   const rows = useMemo(() => categoryBreakdown(snap.transactions, snap.categories, year, month), [snap, year, month]);
   const trend = useMemo(() => monthlyTrend(snap.transactions, { year, month }), [snap.transactions, year, month]);
   const merchants = topMerchants(snap.transactions, year, month);
@@ -20,6 +32,22 @@ export function AnalyticsPage() {
   const insight = expense <= 0 || !top
     ? "이 달의 지출이 아직 없습니다."
     : `지출의 ${Math.round((top.amount / expense) * 100)}%가 ${top.name}입니다.${merchants[0] ? ` 가장 큰 사용처는 ${merchants[0].merchant}입니다.` : ""}`;
+
+  function openSpending(categoryId?: string, title = "지출", color?: string, when = { year, month }) {
+    setDetail({ title, color, year: when.year, month: when.month, kind: "spending", categoryId });
+  }
+
+  function openIncome(when = { year, month }) {
+    setDetail({ title: "수입", year: when.year, month: when.month, kind: "income" });
+  }
+
+  function openBar(data: { payload?: { key?: string } }, kind: "spending" | "income") {
+    const key = data.payload?.key;
+    if (!key) return;
+    const [barYear, barMonth] = key.split("-").map(Number);
+    if (kind === "income") openIncome({ year: barYear, month: barMonth });
+    else openSpending(undefined, "지출", undefined, { year: barYear, month: barMonth });
+  }
 
   return (
     <div className="space-y-5">
@@ -38,8 +66,8 @@ export function AnalyticsPage() {
       </div>
 
       <div className="grid gap-3 sm:grid-cols-3">
-        <Stat label="지출" value={won(expense)} />
-        <Stat label="수입" value={won(income)} />
+        <Stat label="지출" value={won(expense)} onClick={() => openSpending()} />
+        <Stat label="수입" value={won(income)} onClick={() => openIncome()} />
         <Stat label="수입 − 지출" value={won(income - expense)} />
       </div>
 
@@ -52,7 +80,19 @@ export function AnalyticsPage() {
             <div className="h-72">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
-                  <Pie data={rows} dataKey="amount" nameKey="name" innerRadius={62} outerRadius={96} paddingAngle={2}>
+                  <Pie
+                    data={rows}
+                    dataKey="amount"
+                    nameKey="name"
+                    innerRadius={62}
+                    outerRadius={96}
+                    paddingAngle={2}
+                    cursor="pointer"
+                    onClick={(_, index) => {
+                      const row = rows[index];
+                      if (row) openSpending(row.categoryId, row.name, row.color);
+                    }}
+                  >
                     {rows.map((row) => (
                       <Cell key={row.categoryId} fill={row.color} />
                     ))}
@@ -62,16 +102,22 @@ export function AnalyticsPage() {
               </ResponsiveContainer>
             </div>
           )}
-          <ul className="space-y-2">
+          <ul className="space-y-1">
             {rows.map((row) => (
-              <li key={row.categoryId} className="flex items-center justify-between text-sm">
-                <span className="flex items-center gap-2">
-                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: row.color }} />
-                  {row.name}
-                </span>
-                <span className="tabular">
-                  {won(row.amount)} · {expense ? Math.round((row.amount / expense) * 100) : 0}%
-                </span>
+              <li key={row.categoryId}>
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-sm hover:bg-paper"
+                  onClick={() => openSpending(row.categoryId, row.name, row.color)}
+                >
+                  <span className="flex items-center gap-2">
+                    <span className="h-2.5 w-2.5 rounded-full" style={{ background: row.color }} />
+                    {row.name}
+                  </span>
+                  <span className="tabular">
+                    {won(row.amount)} · {expense ? Math.round((row.amount / expense) * 100) : 0}%
+                  </span>
+                </button>
               </li>
             ))}
           </ul>
@@ -85,8 +131,8 @@ export function AnalyticsPage() {
                 <XAxis dataKey="label" tickLine={false} axisLine={false} />
                 <YAxis hide />
                 <Tooltip formatter={(value, name) => [won(Number(value)), name === "expense" ? "지출" : "수입"]} />
-                <Bar dataKey="income" fill="#1e6a45" radius={4} />
-                <Bar dataKey="expense" fill="#b6402c" radius={4} />
+                <Bar dataKey="income" fill="#1e6a45" radius={4} cursor="pointer" onClick={(data) => openBar(data, "income")} />
+                <Bar dataKey="expense" fill="#b6402c" radius={4} cursor="pointer" onClick={(data) => openBar(data, "spending")} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -102,15 +148,142 @@ export function AnalyticsPage() {
           </ul>
         </section>
       </div>
+
+      {detail && <PatternSheet detail={detail} onClose={() => setDetail(null)} />}
     </div>
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <section className="sheet p-4">
+function Stat({ label, value, onClick }: { label: string; value: string; onClick?: () => void }) {
+  const className = "sheet p-4 text-left";
+  const body = (
+    <>
       <p className="text-sm text-muted">{label}</p>
       <p className="tabular mt-1 text-2xl font-semibold">{value}</p>
-    </section>
+    </>
   );
+  if (!onClick) return <section className={className}>{body}</section>;
+  return (
+    <button type="button" className={`${className} cursor-pointer hover:bg-paper`} onClick={onClick}>
+      {body}
+    </button>
+  );
+}
+
+function PatternSheet({ detail, onClose }: { detail: Detail; onClose: () => void }) {
+  const ledger = useLedger();
+  const rows = ledger.snap.transactions
+    .filter((transaction) => matches(transaction, detail))
+    .sort((a, b) => +new Date(b.occurredAt) - +new Date(a.occurredAt));
+  const showInstallment = rows.some((row) => installmentOf(row));
+  const total = rows.reduce((sum, row) => sum + signed(row, detail), 0);
+
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", onKey);
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = previous;
+    };
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-end justify-center bg-ink/40 p-3 sm:items-center" onClick={onClose}>
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="pattern-sheet"
+        className="flex max-h-[85vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-line bg-sheet shadow-xl"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3 border-b border-line px-4 py-3">
+          <div>
+            <h3 id="pattern-sheet" className="flex items-center gap-2 text-lg font-semibold">
+              {detail.color && <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: detail.color }} />}
+              {detail.title}
+            </h3>
+            <p className="mt-1 text-sm text-muted">
+              {monthLabel(detail.year, detail.month)} · {rows.length}건
+            </p>
+          </div>
+          <Button tone="ghost" onClick={onClose}>
+            닫기
+          </Button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto">
+          {rows.length === 0 ? (
+            <p className="px-4 py-8 text-sm text-muted">이 기간에 해당하는 내역이 없습니다.</p>
+          ) : (
+            <table className="w-full min-w-[720px] border-collapse text-sm">
+              <thead className="sticky top-0 bg-[#f2f2f2] text-left">
+                <tr>
+                  <th className="border border-line px-2 py-1.5 font-medium">날짜</th>
+                  <th className="border border-line px-2 py-1.5 font-medium">사용처</th>
+                  <th className="border border-line px-2 py-1.5 font-medium">구분</th>
+                  <th className="border border-line px-2 py-1.5 font-medium">카테고리</th>
+                  {showInstallment && <th className="border border-line px-2 py-1.5 font-medium">할부</th>}
+                  <th className="border border-line px-2 py-1.5 text-right font-medium">금액</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => {
+                  const amount = signed(row, detail);
+                  const category = ledger.snap.categories.find((item) => item.id === row.categoryId);
+                  return (
+                    <tr key={row.id} className="odd:bg-white">
+                      <td className="border border-line px-2 py-1.5 tabular whitespace-nowrap">
+                        {seoulDateKey(row.occurredAt)} {formatSeoulTime(row.occurredAt)}
+                      </td>
+                      <td className="border border-line px-2 py-1.5">{shortMerchant(row.merchant)}</td>
+                      <td className="border border-line px-2 py-1.5 whitespace-nowrap">{directionLabel(row)}</td>
+                      <td className="border border-line px-2 py-1.5 whitespace-nowrap">
+                        <span className="mr-1.5 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: category?.color ?? "#6f685e" }} />
+                        {category?.name ?? "미분류"}
+                      </td>
+                      {showInstallment && <td className="border border-line px-2 py-1.5 tabular">{installmentOf(row)}</td>}
+                      <td className={`border border-line px-2 py-1.5 text-right tabular ${amount < 0 || detail.kind === "income" ? "text-pine" : ""}`}>{won(amount)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr className="bg-[#f7f4ee] font-semibold">
+                  <td className="border border-line px-2 py-1.5" colSpan={showInstallment ? 5 : 4}>
+                    합계
+                  </td>
+                  <td className="border border-line px-2 py-1.5 text-right tabular">{won(total)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function matches(transaction: Transaction, detail: Detail): boolean {
+  if (!inMonth(transaction.occurredAt, detail.year, detail.month)) return false;
+  if (detail.kind === "income") return incomeOf(transaction) !== 0;
+  if (detail.categoryId !== undefined && (transaction.categoryId ?? "none") !== detail.categoryId) return false;
+  return spendingOf(transaction) !== 0;
+}
+
+function signed(transaction: Transaction, detail: Detail): number {
+  return detail.kind === "income" ? incomeOf(transaction) : spendingOf(transaction);
+}
+
+function directionLabel(transaction: Transaction): string {
+  if (transaction.direction === "refund") return "취소";
+  if (transaction.direction === "income") return "수입";
+  return "지출";
+}
+
+function installmentOf(row: Transaction): string {
+  const match = row.rawText?.match(/할부\s*(\d+\s*\/\s*\d+)/);
+  return match ? match[1].replace(/\s+/g, "") : "";
 }

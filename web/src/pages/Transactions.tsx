@@ -2,7 +2,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { useLedger, type NewTransaction } from "../context/LedgerContext";
 import { accountLabel, mainAccount, resolveAccount, transactionBank } from "../lib/accounts";
 import { parseNotification } from "../lib/parseNotification";
-import { clampDay, formatKoreanDate, parseAmountInput, seoulDateKey, seoulParts, shiftYmd, won, ymdKey } from "../lib/format";
+import { clampDay, formatKoreanDate, formatSeoulTime, parseAmountInput, seoulDateKey, seoulParts, shiftYmd, won, ymdKey } from "../lib/format";
 import { planInstallment } from "../lib/installment";
 import { shortMerchant } from "../lib/parseNotification";
 import type { BankAccount, Category, CreditCard, Direction, PayMethod, Transaction } from "../lib/types";
@@ -189,6 +189,8 @@ export function TransactionsPage() {
                     <span className="min-w-0">
                     <span className="block truncate font-medium">{shortMerchant(transaction.merchant)}</span>
                     <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-sm text-muted">
+                      <span className="tabular">{formatSeoulTime(transaction.occurredAt)}</span>
+                      {" · "}
                       <CategoryDot category={ledger.snap.categories.find((category) => category.id === transaction.categoryId)} />
                       {ledger.snap.categories.find((category) => category.id === transaction.categoryId)?.name ?? "미분류"}
                       {" · "}
