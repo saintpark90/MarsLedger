@@ -92,6 +92,7 @@ export type Salary = {
   day?: number;
   amount: number;
   received: boolean;
+  company?: string;
 };
 
 export type RecurringMark = {

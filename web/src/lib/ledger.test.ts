@@ -285,15 +285,16 @@ describe("buildForecast", () => {
     expect(forecast.expectedBalance).toBe(800_000);
   });
 
-  it("adds each unpaid salary day and skips a day that already passed", () => {
+  it("keeps reference paydays pending until a company deposit arrives", () => {
+    const salaries = [
+      { id: "a", year: 2026, month: 9, day: 25, amount: 2_000_000, received: true, company: "아세아제지" },
+      { id: "b", year: 2026, month: 9, day: 31, amount: 500_000, received: true, company: "보너스" },
+    ];
     const early = buildForecast({
       today: { year: 2026, month: 10, day: 8 },
       balance: 1_000_000,
       payday: 25,
-      salaries: [
-        { id: "a", year: 2026, month: 9, day: 25, amount: 2_000_000, received: true },
-        { id: "b", year: 2026, month: 9, day: 31, amount: 500_000, received: true },
-      ],
+      salaries,
       recurring: [],
       recurringMarks: [],
       cards: [],
@@ -304,23 +305,55 @@ describe("buildForecast", () => {
     expect(early.expectedBalance).toBe(3_500_000);
 
     const later = buildForecast({
-      ...{
-        today: { year: 2026, month: 10, day: 26 },
-        balance: 1_000_000,
-        payday: 25,
-        salaries: [
-          { id: "a", year: 2026, month: 9, day: 25, amount: 2_000_000, received: true },
-          { id: "b", year: 2026, month: 9, day: 31, amount: 500_000, received: true },
-        ],
-        recurring: [],
-        recurringMarks: [],
-        cards: [],
-        cardMarks: [],
-        transactions: [],
-      },
+      today: { year: 2026, month: 10, day: 26 },
+      balance: 1_000_000,
+      payday: 25,
+      salaries,
+      recurring: [],
+      recurringMarks: [],
+      cards: [],
+      cardMarks: [],
+      transactions: [],
     });
-    expect(later.salaryLines.filter((line) => line.pending).map((line) => line.day)).toEqual([31]);
-    expect(later.expectedBalance).toBe(1_500_000);
+    expect(later.salaryLines.filter((line) => line.pending).map((line) => line.day)).toEqual([25, 31]);
+    expect(later.expectedBalance).toBe(3_500_000);
+  });
+
+  it("uses a deposit whose name ends with the company, even the day before payday", () => {
+    const salaries = [{ id: "a", year: 2026, month: 9, day: 25, amount: 3_000_000, received: true, company: "아세아제지" }];
+    const deposit = {
+      ...tx("pay", 3_200_000, "2026-09-24T00:10:00.000Z", null),
+      merchant: "급여_아세아제지",
+      direction: "income" as const,
+      method: "transfer" as const,
+    };
+    const before = buildForecast({
+      today: { year: 2026, month: 10, day: 10 },
+      balance: 1_000_000,
+      payday: 25,
+      salaries,
+      recurring: [],
+      recurringMarks: [],
+      cards: [],
+      cardMarks: [],
+      transactions: [deposit],
+    });
+    expect(before.salaryLines[0]).toMatchObject({ amount: 3_200_000, pending: true, fromDeposit: true });
+    expect(before.expectedBalance).toBe(4_200_000);
+
+    const arrived = buildForecast({
+      today: { year: 2026, month: 10, day: 24 },
+      balance: 4_200_000,
+      payday: 25,
+      salaries,
+      recurring: [],
+      recurringMarks: [],
+      cards: [],
+      cardMarks: [],
+      transactions: [{ ...deposit, id: "again", occurredAt: "2026-10-24T00:10:00.000Z" }],
+    });
+    expect(arrived.salaryPending).toBe(false);
+    expect(arrived.expectedBalance).toBe(4_200_000);
   });
 
   it("uses this month's variable amount, then last month's", () => {

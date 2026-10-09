@@ -146,7 +146,11 @@ export function normalizeSnapshot(snap: LedgerSnapshot): LedgerSnapshot {
       referenceMerchant: item.referenceMerchant ?? null,
       referenceTransactionId: item.referenceTransactionId ?? null,
     })),
-    salaries: (snap.salaries ?? []).map((salary) => ({ ...salary, day: salary.day && salary.day >= 1 ? salary.day : snap.settings.payday })),
+    salaries: (snap.salaries ?? []).map((salary) => ({
+      ...salary,
+      day: salary.day && salary.day >= 1 ? salary.day : snap.settings.payday,
+      company: salary.company ?? "",
+    })),
     recurringMarks: (snap.recurringMarks ?? []).map((mark) => ({ ...mark, settled: mark.settled ?? null, amount: mark.amount ?? null })),
     transactions: snap.transactions.map(normalizeTransaction),
     settings: {

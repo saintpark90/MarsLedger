@@ -108,7 +108,7 @@ export function buildSample(base: LedgerSnapshot, today: YMD): LedgerSnapshot {
     makeTx(base, { amount: 12_000, merchant: "이마트", method: "credit", instrument: "삼성카드", cardId: samsung.id, when: at(today.year, today.month, spendDay, 18) }),
     makeTx(base, {
       amount: 3_200_000,
-      merchant: "급여",
+      merchant: "급여_아세아제지",
       direction: "income",
       method: "transfer",
       instrument: "카카오뱅크",
@@ -128,7 +128,7 @@ export function buildSample(base: LedgerSnapshot, today: YMD): LedgerSnapshot {
     accounts: [kakao],
     cards: [samsung, hyundai],
     recurring,
-    salaries: [{ id: createId(), year: prev.year, month: prev.month, amount: 3_200_000, received: true }],
+    salaries: [{ id: createId(), year: prev.year, month: prev.month, day: 25, amount: 3_200_000, received: true, company: "아세아제지" }],
     recurringMarks: [],
     cardMarks: [],
     transactions,

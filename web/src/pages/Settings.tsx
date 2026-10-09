@@ -3,7 +3,8 @@ import { Link } from "react-router-dom";
 import { useLedger } from "../context/LedgerContext";
 import { accountLabel, mainAccount, unseenSignals } from "../lib/accounts";
 import { readConnection } from "../lib/connection";
-import { monthLabel, parseAmountInput, previousMonth, seoulParts } from "../lib/format";
+import { monthLabel, parseAmountInput, previousMonth, seoulParts, won } from "../lib/format";
+import { latestSalaryDeposit } from "../lib/forecast";
 import { useInstallPrompt } from "../components/useInstall";
 import { AccountThumb } from "../components/Thumbs";
 import { Button, Field, TextInput } from "../components/Ui";
@@ -155,18 +156,18 @@ export function SettingsPage() {
         <div>
           <h3 className="font-semibold">급여</h3>
           <p className="mt-1 text-sm text-muted">
-            급여일이 여러 번이면 각각 넣습니다. 이번 달 금액이 없으면 지난달 같은 날짜의 금액을, 그 날이 오기 전까지만 더합니다. 입금 완료로 표시하면 이미 잔액에 있는 것으로 보고 다시 더하지 않습니다.
+            금액은 예상값입니다. 입금명이 회사명으로 끝나면 그 급여로 보고, 한 번이라도 들어오면 그 금액으로 계산합니다. 급여일은 참고만 하며, 빨간날 전날에 들어와도 회사명으로 찾습니다.
           </p>
         </div>
         <SalaryMonth year={today.year} month={today.month} salaries={currentSalaries} payday={ledger.snap.settings.payday} />
-        <SalaryMonth year={previous.year} month={previous.month} salaries={previousSalaries} payday={ledger.snap.settings.payday} />
+        <SalaryMonth year={previous.year} month={previous.month} salaries={previousSalaries} payday={ledger.snap.settings.payday} canAdd />
       </section>
 
       <section className="sheet space-y-2 p-4 text-sm leading-6">
         <h3 className="font-semibold">계산 기준</h3>
         <p>각 통장 잔액에서, 그 통장으로 지정한 자동이체 가운데 오늘 포함 아직 지나지 않은 항목을 뺍니다. 통장이 비어 있는 기존 자동이체는 메인 통장에서 나갑니다. 이체일 31일은 그 달의 말일입니다.</p>
         <p>카드 청구액은 카드에 정한 이용기간의 사용 합계입니다. 이번 달 출금이 아직 지나기 전이면 그 청구액을 빼고, 지금 쌓인 이용금액도 출금일이 다음 달이어도 이번 달 남는 돈에서 뺍니다. 직접 입력한 금액이 있으면 그 값을 씁니다.</p>
-        <p>급여일이 되기 전이거나 이번 달 급여를 미입금으로 표시하면 급여를 더합니다. 이번 달 급여가 비어 있으면 지난달 금액입니다.</p>
+        <p>이번 달 급여가 비어 있으면 지난달 급여를 더합니다. 회사명으로 끝나는 입금이 이번 달에 있으면 이미 들어온 것으로 보고, 가장 최근 입금 금액을 다음 예상에도 씁니다. 급여일은 그때쯤 들어온다는 참고입니다.</p>
         <p>
           카드와 분류 규칙은 <Link className="text-pine" to="/cards">카드</Link>, <Link className="text-pine" to="/rules">분류</Link>에서 수정합니다.
         </p>
@@ -246,15 +247,18 @@ function SalaryMonth({
   month,
   salaries,
   payday,
+  canAdd = false,
 }: {
   year: number;
   month: number;
   salaries: Salary[];
   payday: number;
+  canAdd?: boolean;
 }) {
   const ledger = useLedger();
   const [day, setDay] = useState(String(payday));
   const [amount, setAmount] = useState("");
+  const [company, setCompany] = useState("");
   const rows = [...salaries].sort((left, right) => (left.day ?? payday) - (right.day ?? payday));
 
   return (
@@ -262,52 +266,69 @@ function SalaryMonth({
       <p className="text-sm font-medium">{monthLabel(year, month)}</p>
       {rows.length === 0 && <p className="text-sm text-muted">입력 없음</p>}
       {rows.map((salary) => (
-        <SalaryRow key={salary.id} salary={salary} />
+        <SalaryRow key={salary.id} salary={salary} peers={rows} payday={payday} />
       ))}
-      <div className="grid gap-2 md:grid-cols-[100px_1fr_auto] md:items-end">
-        <Field label="급여일">
-          <TextInput inputMode="numeric" value={day} onChange={(event) => setDay(event.target.value)} />
-        </Field>
-        <Field label="금액">
-          <TextInput inputMode="numeric" value={amount} onChange={(event) => setAmount(event.target.value)} />
-        </Field>
-        <Button
-          tone="pine"
-          onClick={() => {
-            const payDay = Number(day);
-            const value = parseAmountInput(amount);
-            if (payDay < 1 || payDay > 31 || value <= 0) return;
-            void ledger.saveSalary(year, month, value, false, payDay);
-            setAmount("");
-          }}
-        >
-          급여 추가
-        </Button>
-      </div>
+      {canAdd && (
+        <div className="grid gap-2 md:grid-cols-[1fr_100px_1fr_auto] md:items-end">
+          <Field label="회사명">
+            <TextInput value={company} onChange={(event) => setCompany(event.target.value)} placeholder="아세아제지" />
+          </Field>
+          <Field label="급여일">
+            <TextInput inputMode="numeric" value={day} onChange={(event) => setDay(event.target.value)} />
+          </Field>
+          <Field label="금액">
+            <TextInput inputMode="numeric" value={amount} onChange={(event) => setAmount(event.target.value)} />
+          </Field>
+          <Button
+            tone="pine"
+            onClick={() => {
+              const payDay = Number(day);
+              const value = parseAmountInput(amount);
+              if (payDay < 1 || payDay > 31 || value <= 0) return;
+              void ledger.saveSalary(year, month, value, false, payDay, company);
+              setAmount("");
+              setCompany("");
+            }}
+          >
+            급여 추가
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
 
-function SalaryRow({ salary }: { salary: Salary }) {
+function SalaryRow({ salary, peers, payday }: { salary: Salary; peers: Salary[]; payday: number }) {
   const ledger = useLedger();
+  const day = salary.day && salary.day >= 1 ? salary.day : payday;
   const [amount, setAmount] = useState(String(salary.amount));
+  const [company, setCompany] = useState(salary.company ?? "");
   const [received, setReceived] = useState(salary.received);
+  const deposit = latestSalaryDeposit({ ...salary, company }, peers.map((item) => (item.id === salary.id ? { ...item, company } : item)), ledger.snap.transactions);
 
   return (
-    <div className="grid gap-2 rounded-lg bg-white p-3 md:grid-cols-[80px_1fr_auto_auto] md:items-center">
-      <p className="text-sm">{salary.day ?? "급여"}일</p>
-      <TextInput inputMode="numeric" value={amount} onChange={(event) => setAmount(event.target.value)} />
-      <label className="flex items-center gap-2 text-sm">
-        <input type="checkbox" checked={received} onChange={(event) => setReceived(event.target.checked)} />
-        들어옴
-      </label>
+    <div className="space-y-2 rounded-lg bg-white p-3">
+      <div className="grid gap-2 md:grid-cols-[1fr_1fr_auto] md:items-end">
+        <Field label="회사명">
+          <TextInput value={company} onChange={(event) => setCompany(event.target.value)} placeholder="아세아제지" />
+        </Field>
+        <Field label="예상 금액">
+          <TextInput inputMode="numeric" value={amount} onChange={(event) => setAmount(event.target.value)} />
+        </Field>
+        <label className="flex items-center gap-2 pb-2 text-sm">
+          <input type="checkbox" checked={received} onChange={(event) => setReceived(event.target.checked)} />
+          들어옴
+        </label>
+      </div>
+      <p className="text-sm text-muted">급여일 {day}일은 참고입니다. 빨간날이면 전날에 들어와도 회사명으로 찾습니다.</p>
+      {deposit && <p className="text-sm text-muted">최근 입금 {deposit.merchant} {won(deposit.amount)}을 계산 기준으로 씁니다.</p>}
       <div className="flex gap-2">
         <Button
           tone="ghost"
           onClick={() => {
             const value = parseAmountInput(amount);
-            if (value <= 0 || !salary.day) return;
-            void ledger.saveSalary(salary.year, salary.month, value, received, salary.day);
+            if (value <= 0) return;
+            void ledger.saveSalary(salary.year, salary.month, value, received, day, company);
           }}
         >
           저장
