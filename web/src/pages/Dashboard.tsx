@@ -197,7 +197,7 @@ function AccountForecast({
             label={
               <span className="inline-flex items-center gap-2">
                 <CardThumb name={card.name} color={card.color} size="sm" />
-                {card.name} · {formatKoreanYmd(card.openPayment)} 출금 · 이미 쓴 금액
+                {card.name} · {formatKoreanYmd(card.openPayment)} 출금
               </span>
             }
             value={-card.usageThisMonth}
