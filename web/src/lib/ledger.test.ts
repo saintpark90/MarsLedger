@@ -333,6 +333,56 @@ describe("buildForecast", () => {
     expect(later.expectedBalance).toBe(3_500_000);
   });
 
+  it("keeps last month's other payday when this month only has one", () => {
+    const forecast = buildForecast({
+      today: { year: 2026, month: 10, day: 10 },
+      balance: 1_000_000,
+      payday: 25,
+      salaries: [
+        { id: "old-pay", year: 2026, month: 9, day: 25, amount: 2_000_000, received: true, company: "아세아제지", title: "급여" },
+        { id: "old-bonus", year: 2026, month: 9, day: 31, amount: 500_000, received: true, company: "아세아제지", title: "상여" },
+        { id: "new-pay", year: 2026, month: 10, day: 25, amount: 2_100_000, received: false, company: "아세아제지", title: "급여" },
+      ],
+      recurring: [],
+      recurringMarks: [],
+      cards: [],
+      cardMarks: [],
+      transactions: [],
+    });
+    expect(forecast.salaryLines.filter((line) => line.pending).map((line) => `${line.title}:${line.day}`)).toEqual(["급여:25", "상여:31"]);
+    expect(forecast.salaryAmount).toBe(2_600_000);
+  });
+
+  it("matches a deposit to the named pay item, not the other one from the same company", () => {
+    const salaries = [
+      { id: "pay", year: 2026, month: 9, day: 25, amount: 2_000_000, received: true, company: "아세아제지", title: "급여" },
+      { id: "bonus", year: 2026, month: 9, day: 31, amount: 400_000, received: true, company: "아세아제지", title: "상여" },
+    ];
+    const forecast = buildForecast({
+      today: { year: 2026, month: 10, day: 10 },
+      balance: 3_000_000,
+      payday: 25,
+      salaries,
+      recurring: [],
+      recurringMarks: [],
+      cards: [],
+      cardMarks: [],
+      transactions: [
+        {
+          ...tx("pay", 2_100_000, "2026-10-09T00:10:00.000Z", null),
+          merchant: "급여_아세아제지",
+          direction: "income" as const,
+          method: "transfer" as const,
+        },
+      ],
+    });
+    expect(forecast.salaryLines.map((line) => ({ title: line.title, pending: line.pending, amount: line.amount }))).toEqual([
+      { title: "급여", pending: false, amount: 2_100_000 },
+      { title: "상여", pending: true, amount: 400_000 },
+    ]);
+    expect(forecast.salaryAmount).toBe(400_000);
+  });
+
   it("uses a deposit whose name ends with the company, even the day before payday", () => {
     const salaries = [{ id: "a", year: 2026, month: 9, day: 25, amount: 3_000_000, received: true, company: "아세아제지" }];
     const deposit = {

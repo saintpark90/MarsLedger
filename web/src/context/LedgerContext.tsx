@@ -90,7 +90,7 @@ type LedgerController = {
   addAccount: (input: { name: string; bankName: string; last4: string; balance: number; isMain?: boolean }) => Promise<boolean>;
   updateAccount: (id: string, patch: Partial<BankAccount>) => Promise<boolean>;
   deleteAccount: (id: string) => Promise<boolean>;
-  saveSalary: (year: number, month: number, amount: number, received: boolean, day?: number, company?: string) => Promise<boolean>;
+  saveSalary: (year: number, month: number, amount: number, received: boolean, day?: number, company?: string, title?: string) => Promise<boolean>;
   clearSalary: (year: number, month: number, day?: number) => Promise<boolean>;
   addTransaction: (input: NewTransaction) => Promise<boolean>;
   importTransactions: (inputs: NewTransaction[], notice?: string) => Promise<boolean>;
@@ -331,11 +331,11 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
           await saveSettings(next.settings);
         });
       },
-      saveSalary: (year, month, amount, received, day = snap.settings.payday, company = "") => {
+      saveSalary: (year, month, amount, received, day = snap.settings.payday, company = "", title = "") => {
         const existing = snap.salaries.find(
           (salary) => salary.year === year && salary.month === month && (salary.day ?? snap.settings.payday) === day,
         );
-        const salary = { id: existing?.id ?? createId(), year, month, day, amount, received, company: company.trim() };
+        const salary = { id: existing?.id ?? createId(), year, month, day, amount, received, company: company.trim(), title: title.trim() };
         const salaries = existing
           ? snap.salaries.map((item) => (item.id === existing.id ? salary : item))
           : [...snap.salaries, salary];

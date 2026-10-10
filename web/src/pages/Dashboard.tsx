@@ -167,7 +167,7 @@ function AccountForecast({
           .map((line) => (
             <Line
               key={line.id}
-              label={`급여 · ${line.day}일 참고${line.fromDeposit ? " · 최근 입금" : line.usedPreviousMonth ? " · 지난달 금액" : ""}`}
+              label={`${line.title} · ${line.day}일 참고${line.fromDeposit ? " · 최근 입금" : line.usedPreviousMonth ? " · 지난달 금액" : ""}`}
               value={line.amount}
             />
           ))}

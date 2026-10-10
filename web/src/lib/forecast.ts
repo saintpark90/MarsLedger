@@ -5,6 +5,7 @@ import type { CardMark, CreditCard, Recurring, RecurringMark, Salary, Transactio
 
 export type ForecastSalary = {
   id: string;
+  title: string;
   day: number;
   amount: number;
   pending: boolean;
@@ -172,24 +173,31 @@ function salariesForMonth(salaries: Salary[], today: YMD, payday: number, transa
   const current = salaries.filter((salary) => salary.year === today.year && salary.month === today.month);
   const prev = previousMonth(today.year, today.month);
   const previous = salaries.filter((salary) => salary.year === prev.year && salary.month === prev.month);
-  const source = current.length > 0 ? current : previous;
-  const usedPreviousMonth = current.length === 0 && previous.length > 0;
-  const deposits = depositsBySalary(source, transactions);
-  return source.map((salary) => {
-    const day = clampDay(today.year, today.month, salary.day && salary.day >= 1 ? salary.day : payday);
+  const chosen = new Map<number, { salary: Salary; fromPrevious: boolean }>();
+  for (const salary of previous) chosen.set(paydayOf(salary, payday), { salary, fromPrevious: true });
+  for (const salary of current) chosen.set(paydayOf(salary, payday), { salary, fromPrevious: false });
+  const source = [...chosen.values()].sort((left, right) => paydayOf(left.salary, payday) - paydayOf(right.salary, payday));
+  const deposits = depositsBySalary(source.map((entry) => entry.salary), transactions);
+  return source.map(({ salary, fromPrevious }) => {
+    const day = clampDay(today.year, today.month, paydayOf(salary, payday));
     const matched = deposits.get(salary.id) ?? [];
     const latest = latestOf(matched);
     const arrived = matched.some((transaction) => inMonth(transaction.occurredAt, today.year, today.month));
-    const pending = arrived ? false : usedPreviousMonth ? true : !salary.received;
+    const pending = arrived ? false : fromPrevious ? true : !salary.received;
     return {
       id: salary.id,
+      title: salary.title?.trim() || "급여",
       day,
       amount: latest?.amount ?? salary.amount,
       pending,
-      usedPreviousMonth,
+      usedPreviousMonth: fromPrevious,
       fromDeposit: Boolean(latest),
     };
   });
+}
+
+function paydayOf(salary: Salary, payday: number): number {
+  return salary.day && salary.day >= 1 ? salary.day : payday;
 }
 
 export function latestSalaryDeposit(salary: Salary, peers: Salary[], transactions: Transaction[]): Transaction | null {
@@ -201,10 +209,9 @@ function depositsBySalary(salaries: Salary[], transactions: Transaction[]): Map<
   for (const transaction of transactions) {
     if (transaction.direction !== "income" || transaction.excluded) continue;
     const owner = salaries.reduce<Salary | null>((best, salary) => {
-      const suffix = compact(salary.company ?? "");
-      if (!suffix || !compact(transaction.merchant).endsWith(suffix)) return best;
-      const bestLength = compact(best?.company ?? "").length;
-      return suffix.length > bestLength ? salary : best;
+      const score = depositScore(salary, transaction.merchant);
+      if (score <= 0) return best;
+      return score > depositScore(best, transaction.merchant) ? salary : best;
     }, null);
     if (owner) grouped.get(owner.id)?.push(transaction);
   }
@@ -217,6 +224,16 @@ function latestOf(transactions: Transaction[]): Transaction | null {
 
 function compact(value: string): string {
   return value.replace(/\s+/g, "");
+}
+
+function depositScore(salary: Salary | null, merchant: string): number {
+  if (!salary) return 0;
+  const company = compact(salary.company ?? "");
+  const text = compact(merchant);
+  if (!company || !text.endsWith(company)) return 0;
+  const name = compact(salary.title ?? "");
+  if (name && text.includes(name)) return 1000 + company.length + name.length;
+  return company.length;
 }
 
 function placeKey(value: string): string {

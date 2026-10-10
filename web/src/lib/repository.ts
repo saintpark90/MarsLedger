@@ -368,6 +368,7 @@ export async function saveSalary(salary: Salary): Promise<void> {
       amount: salary.amount,
       received: salary.received,
       company_name: salary.company?.trim() || null,
+      pay_name: salary.title?.trim() || null,
     },
     { onConflict: "user_id,year,month,day_of_month" },
   );
@@ -387,6 +388,9 @@ function recurringAccountError(error: { message?: string; code?: string }): stri
 
 function salaryError(error: { message?: string; code?: string }): string {
   const message = `${error.message ?? ""} ${error.code ?? ""}`;
+  if (/pay_name/i.test(message)) {
+    return "급여 이름을 쓰려면 Supabase SQL Editor에서 supabase/migrations/20261010140000_salary_title.sql 을 실행해 주세요.";
+  }
   if (/company_name/i.test(message)) {
     return "급여 회사명을 쓰려면 Supabase SQL Editor에서 supabase/migrations/20261009190000_salary_company.sql 을 실행해 주세요.";
   }
@@ -603,6 +607,7 @@ function mapSalary(row: Row): Salary {
     amount: Number(row.amount),
     received: Boolean(row.received),
     company: row.company_name == null ? "" : String(row.company_name),
+    title: row.pay_name == null ? "" : String(row.pay_name),
   };
 }
 
