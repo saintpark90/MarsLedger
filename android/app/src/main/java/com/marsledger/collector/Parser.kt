@@ -51,9 +51,9 @@ private val noiseWords = (
 fun accountLast4Of(raw: String): String? {
     val text = raw.replace(Regex("\\s+"), " ")
     val patterns = listOf(
-        Regex("(?:입|출)?\\s*통장\\s*(\\d{4})"),
-        Regex("입출금통장\\s*\\(?\\s*(\\d{4})\\)?"),
-        Regex("계좌\\s*(?:번호)?\\s*\\(?\\s*(?:\\*+)?(\\d{4})\\)?"),
+        Regex("(?:입출금통장|모임통장|저금통|세이프박스|자유적금)\\s*[\\(\\[ ]?\\s*(?:\\*+)?(\\d{4})\\s*[\\)\\]]?"),
+        Regex("(?:입|출)?\\s*통장\\s*[\\(\\[ ]?\\s*(?:\\*+)?(\\d{4})\\s*[\\)\\]]?"),
+        Regex("계좌\\s*(?:번호)?\\s*[\\(\\[ ]?\\s*(?:\\*+)?(\\d{4})\\s*[\\)\\]]?"),
     )
     for (pattern in patterns) {
         val found = pattern.find(text)?.groupValues?.getOrNull(1)
@@ -101,8 +101,7 @@ fun parseNotification(raw: String): ParsedNotification? {
     if (amount <= 0) return null
 
     var merchant = working.replace(amountMatch.value, " ")
-    merchant = merchant.replace(Regex("(?:입|출)\\s*통장\\s*\\d{4}"), " ")
-    merchant = merchant.replace(Regex("입출금통장\\s*\\(?\\s*\\d{4}\\)?"), " ")
+    merchant = merchant.replace(Regex("(?:입출금통장|모임통장|저금통|세이프박스|자유적금|(?:입|출)\\s*통장)\\s*[\\(\\[ ]?\\s*(?:\\*+)?\\d{4}\\s*[\\)\\]]?"), " ")
     merchant = merchant.replace(Regex("\\d{1,2}월\\s*\\d{1,2}일"), " ")
     merchant = merchant.replace(Regex("\\d{4}[./-]\\d{1,2}[./-]\\d{1,2}"), " ")
     merchant = merchant.replace(Regex("\\d{1,2}[./]\\d{1,2}"), " ")

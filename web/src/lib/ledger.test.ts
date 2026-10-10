@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import categories from "../../../shared/categories.json";
-import { recurringForAccount, resolveAccount, transactionBank } from "./accounts";
+import { accountForBalance, recurringForAccount, resolveAccount, transactionBank } from "./accounts";
 import { cycleForDate, usageBetween, usageRows } from "./cardCycle";
 import { categoryBreakdown } from "./analytics";
 import { resolveCategoryId } from "./classify";
 import { buildForecast, recurringAmount } from "./forecast";
 import { clampDay } from "./format";
 import { accountMark, cardMark } from "./marks";
-import { merchantLabel, parseNotification, shortMerchant } from "./parseNotification";
+import { last4FromText, merchantLabel, parseNotification, shortMerchant } from "./parseNotification";
 import type { BankAccount, Category, CreditCard, Rule, Transaction } from "./types";
 
 const catalog: Category[] = categories.map((category, index) => ({
@@ -141,6 +141,18 @@ describe("parseNotification", () => {
     expect(shortMerchant("모임통장 모임통장 7260 지에스더프레시 대전 몬스터커피대전도안우미린점 130원")).toBe(
       "몬스터커피대전도안우미린점",
     );
+  });
+
+  it("reads a parenthesized account number", () => {
+    expect(last4FromText("모임통장(7260) 출금 1,300원")).toBe("7260");
+    expect(last4FromText("입출금통장(8547) 입금 300,000원")).toBe("8547");
+    const parsed = parseNotification("카카오뱅크 모임통장(7260) 출금 1,300원 몬스터커피 잔액 50,000원");
+    expect(parsed).toMatchObject({
+      amount: 1300,
+      accountLast4: "7260",
+      balanceAfter: 50000,
+      direction: "expense",
+    });
   });
 
   it("reads a kakaobank deposit that leaves the bank name off the text", () => {
@@ -379,6 +391,34 @@ describe("buildForecast", () => {
     expect(onMain.expectedBalance).toBe(1_500_000);
   });
 
+  it("ignores a deposit whose account number belongs to another account", () => {
+    const main = bank("main", "카카오뱅크", "8547", true);
+    const other = {
+      ...tx("other", 500_000, "2026-10-25T06:00:00.000Z", null),
+      direction: "income" as const,
+      merchant: "상여 아세아제지",
+      accountLast4: "7260",
+      appLabel: "카카오뱅크",
+    };
+    const matched = { ...other, id: "matched", accountLast4: "8547" };
+    const input = {
+      today: { year: 2026, month: 10, day: 26 },
+      balance: 1_000_000,
+      payday: 25,
+      salaries: [
+        { id: "bonus", year: 2026, month: 10, day: 31, amount: 500_000, received: false, company: "아세아제지", title: "상여", accountId: "main" },
+      ],
+      recurring: [],
+      recurringMarks: [],
+      cards: [],
+      cardMarks: [],
+      salaryAccountId: "main",
+      accounts: [main],
+    };
+    expect(buildForecast({ ...input, transactions: [other] }).salaryLines[0]?.pending).toBe(true);
+    expect(buildForecast({ ...input, transactions: [matched] }).salaryLines[0]?.pending).toBe(false);
+  });
+
   it("matches a deposit to the named pay item, not the other one from the same company", () => {
     const salaries = [
       { id: "pay", year: 2026, month: 9, day: 25, amount: 2_000_000, received: true, company: "아세아제지", title: "급여" },
@@ -560,6 +600,27 @@ describe("resolveAccount", () => {
     transaction.accountLast4 = "8547";
     transaction.method = "transfer";
     expect(resolveAccount(transaction, [kakao, toss])).toBeNull();
+  });
+
+  it("leaves a different account number off the registered account", () => {
+    const transaction = tx("t", 1300, "2026-10-10T06:11:00.000Z", null);
+    transaction.appLabel = "카카오뱅크";
+    transaction.packageName = "com.kakaobank.channel";
+    transaction.method = "transfer";
+    transaction.accountLast4 = "7260";
+    transaction.rawText = "모임통장(7260) 출금 1,300원 몬스터커피 잔액 50,000원";
+    transaction.balanceAfter = 50_000;
+    expect(resolveAccount(transaction, [kakao])).toBeNull();
+    expect(accountForBalance(transaction, [kakao])).toBeNull();
+  });
+
+  it("drops a saved link when the notification number belongs to another account", () => {
+    const transaction = tx("t", 1300, "2026-10-10T06:11:00.000Z", null);
+    transaction.appLabel = "카카오뱅크";
+    transaction.method = "transfer";
+    transaction.accountId = "kakao";
+    transaction.accountLast4 = "7260";
+    expect(resolveAccount(transaction, [kakao])).toBeNull();
   });
 
   it("distinguishes two accounts at the same bank", () => {

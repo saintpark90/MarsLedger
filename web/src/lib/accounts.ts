@@ -61,12 +61,23 @@ export function sameBank(left: string, right: string): boolean {
   return a.length > 0 && a.toLowerCase() === b.toLowerCase();
 }
 
+export function notificationLast4(transaction: { accountLast4?: string | null; rawText?: string | null }): string {
+  return transaction.accountLast4 || last4FromText(transaction.rawText ?? "") || "";
+}
+
+export function sameAccountTail(transaction: { accountLast4?: string | null; rawText?: string | null }, account: BankAccount): boolean {
+  const last4 = notificationLast4(transaction);
+  if (!last4 || !account.last4) return true;
+  return last4 === account.last4;
+}
+
 export function resolveAccount(transaction: Transaction, accounts: BankAccount[]): BankAccount | null {
-  if (transaction.accountId) {
-    return accounts.find((account) => account.id === transaction.accountId) ?? null;
-  }
   const bank = transactionBank(transaction);
-  const last4 = transaction.accountLast4 || last4FromText(transaction.rawText ?? "") || "";
+  const last4 = notificationLast4(transaction);
+  if (transaction.accountId) {
+    const linked = accounts.find((account) => account.id === transaction.accountId) ?? null;
+    if (linked && !(last4 && linked.last4 && linked.last4 !== last4)) return linked;
+  }
   const same = bank ? accounts.filter((account) => sameBank(account.bankName, bank)) : [];
   if (last4) {
     if (bank) {
@@ -82,6 +93,14 @@ export function resolveAccount(transaction: Transaction, accounts: BankAccount[]
   return same.length === 1 ? same[0] : null;
 }
 
+export function accountForBalance(transaction: Transaction, accounts: BankAccount[]): BankAccount | null {
+  const matched = resolveAccount(transaction, accounts);
+  if (matched) return matched;
+  if (notificationLast4(transaction)) return null;
+  if (transactionBank(transaction)) return null;
+  return accounts.find((account) => account.isMain) ?? accounts[0] ?? null;
+}
+
 export type AccountSignal = { bankName: string; last4: string };
 
 export function unseenSignals(transactions: Transaction[], accounts: BankAccount[]): AccountSignal[] {
@@ -89,7 +108,7 @@ export function unseenSignals(transactions: Transaction[], accounts: BankAccount
   for (const transaction of transactions) {
     if (resolveAccount(transaction, accounts)) continue;
     const bankName = transactionBank(transaction) ?? "";
-    const last4 = transaction.accountLast4 || last4FromText(transaction.rawText ?? "") || "";
+    const last4 = notificationLast4(transaction);
     if (!bankName && !last4) continue;
     const key = `${bankName}|${last4}`;
     if (!found.has(key)) found.set(key, { bankName, last4 });
@@ -200,7 +219,7 @@ function normalizeTransaction(transaction: Transaction): Transaction {
     ...transaction,
     packageName: transaction.packageName ?? null,
     appLabel: transaction.appLabel ?? null,
-    accountLast4: transaction.accountLast4 || last4FromText(transaction.rawText ?? "") || null,
+    accountLast4: notificationLast4(transaction) || null,
     accountId: transaction.accountId ?? null,
   };
 }

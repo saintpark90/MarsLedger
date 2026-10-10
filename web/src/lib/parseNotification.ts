@@ -138,9 +138,9 @@ function unwrapRepeatedPrefix(tokens: string[]): string[] {
 export function last4FromText(raw: string): string | null {
   const text = raw.replace(/\s+/g, " ");
   const patterns = [
-    /(?:입|출)?\s*통장\s*(\d{4})/,
-    /입출금통장\s*\(?\s*(\d{4})\)?/,
-    /계좌\s*(?:번호)?\s*\(?\s*(?:\*+)?(\d{4})\)?/,
+    /(?:입출금통장|모임통장|저금통|세이프박스|자유적금)\s*[([ ]?\s*(?:\*+)?(\d{4})\s*[)\]]?/,
+    /(?:입|출)?\s*통장\s*[([ ]?\s*(?:\*+)?(\d{4})\s*[)\]]?/,
+    /계좌\s*(?:번호)?\s*[([ ]?\s*(?:\*+)?(\d{4})\s*[)\]]?/,
   ];
   for (const pattern of patterns) {
     const found = text.match(pattern);
@@ -190,8 +190,10 @@ export function parseNotification(raw: string): ParsedNotification | null {
   if (!Number.isFinite(amount) || amount <= 0) return null;
 
   let merchantSource = working.replace(amountMatch[0], " ");
-  merchantSource = merchantSource.replace(/(?:입|출)\s*통장\s*\d{4}/g, " ");
-  merchantSource = merchantSource.replace(/입출금통장\s*\(?\s*\d{4}\)?/g, " ");
+  merchantSource = merchantSource.replace(
+    /(?:입출금통장|모임통장|저금통|세이프박스|자유적금|(?:입|출)\s*통장)\s*[([ ]?\s*(?:\*+)?\d{4}\s*[)\]]?/g,
+    " ",
+  );
   merchantSource = merchantSource.replace(/\d{1,2}월\s*\d{1,2}일/g, " ");
   merchantSource = merchantSource.replace(/\d{4}[./-]\d{1,2}[./-]\d{1,2}/g, " ");
   merchantSource = merchantSource.replace(/\d{1,2}[./]\d{1,2}/g, " ");

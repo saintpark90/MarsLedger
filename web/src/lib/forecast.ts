@@ -1,3 +1,4 @@
+import { sameAccountTail } from "./accounts";
 import { compareYmd, cycleForDate, cyclePayingIn, usageBetween } from "./cardCycle";
 import { clampDay, inMonth, previousMonth } from "./format";
 import { shortMerchant } from "./parseNotification";
@@ -78,11 +79,11 @@ export function buildForecast(input: {
     .filter((item) => {
       const mark = recurringMarks.find((entry) => entry.recurringId === item.id && entry.year === today.year && entry.month === today.month);
       if (mark?.settled != null) return !mark.settled;
-      if (item.amount <= 0 && referencedAmount(item, today.year, today.month, transactions) != null) return false;
+      if (item.amount <= 0 && referencedAmount(item, today.year, today.month, transactions, input.accounts) != null) return false;
       return stillDue(item, today, recurringMarks);
     })
     .map((item) => {
-      const priced = recurringAmount(item, today.year, today.month, recurringMarks, transactions);
+      const priced = recurringAmount(item, today.year, today.month, recurringMarks, transactions, input.accounts);
       return {
         id: item.id,
         name: item.name,
@@ -150,16 +151,17 @@ export function recurringAmount(
   month: number,
   marks: RecurringMark[],
   transactions: Transaction[],
+  accounts?: BankAccount[],
 ): { amount: number; fromPreviousMonth: boolean } {
   if (item.amount > 0) return { amount: item.amount, fromPreviousMonth: false };
-  const currentSpend = referencedAmount(item, year, month, transactions);
+  const currentSpend = referencedAmount(item, year, month, transactions, accounts);
   if (currentSpend != null) return { amount: currentSpend, fromPreviousMonth: false };
   const current = marks.find((mark) => mark.recurringId === item.id && mark.year === year && mark.month === month);
   if (current?.amount != null) return { amount: current.amount, fromPreviousMonth: false };
   const prev = previousMonth(year, month);
   const previous = marks.find((mark) => mark.recurringId === item.id && mark.year === prev.year && mark.month === prev.month);
   if (previous?.amount != null) return { amount: previous.amount, fromPreviousMonth: true };
-  const referenced = referencedAmount(item, prev.year, prev.month, transactions);
+  const referenced = referencedAmount(item, prev.year, prev.month, transactions, accounts);
   if (referenced != null) return { amount: referenced, fromPreviousMonth: true };
   const picked = transactions.find((transaction) => transaction.id === item.referenceTransactionId && !transaction.excluded);
   if (picked) return { amount: picked.amount, fromPreviousMonth: true };
@@ -192,7 +194,7 @@ function salariesForMonth(
   const source = [...chosen.values()]
     .filter((entry) => !scope || salaryAccount(entry.salary, scope.accounts) === scope.accountId)
     .sort((left, right) => paydayOf(left.salary, payday) - paydayOf(right.salary, payday));
-  const deposits = depositsBySalary(source.map((entry) => entry.salary), transactions);
+  const deposits = depositsBySalary(source.map((entry) => entry.salary), transactions, scope?.accounts);
   return source.map(({ salary, fromPrevious }) => {
     const day = clampDay(today.year, today.month, paydayOf(salary, payday));
     const matched = deposits.get(salary.id) ?? [];
@@ -221,17 +223,26 @@ function salaryAccount(salary: Salary, accounts: BankAccount[]): string | null {
   return main?.id ?? null;
 }
 
-export function latestSalaryDeposit(salary: Salary, peers: Salary[], transactions: Transaction[]): Transaction | null {
-  return latestOf(depositsBySalary(peers, transactions).get(salary.id) ?? []);
+export function latestSalaryDeposit(
+  salary: Salary,
+  peers: Salary[],
+  transactions: Transaction[],
+  accounts?: BankAccount[],
+): Transaction | null {
+  return latestOf(depositsBySalary(peers, transactions, accounts).get(salary.id) ?? []);
 }
 
-function depositsBySalary(salaries: Salary[], transactions: Transaction[]): Map<string, Transaction[]> {
+function depositsBySalary(salaries: Salary[], transactions: Transaction[], accounts?: BankAccount[]): Map<string, Transaction[]> {
   const grouped = new Map<string, Transaction[]>(salaries.map((salary) => [salary.id, []]));
   for (const transaction of transactions) {
     if (transaction.direction !== "income" || transaction.excluded) continue;
     const owner = salaries.reduce<Salary | null>((best, salary) => {
       const score = depositScore(salary, transaction.merchant);
       if (score <= 0) return best;
+      if (accounts) {
+        const account = accounts.find((item) => item.id === salaryAccount(salary, accounts));
+        if (account && !sameAccountTail(transaction, account)) return best;
+      }
       return score > depositScore(best, transaction.merchant) ? salary : best;
     }, null);
     if (owner) grouped.get(owner.id)?.push(transaction);
@@ -262,17 +273,31 @@ function placeKey(value: string): string {
   return shortMerchant(value).replace(/\s+/g, "");
 }
 
-function referencedAmount(item: Recurring, year: number, month: number, transactions: Transaction[]): number | null {
+function referencedAmount(
+  item: Recurring,
+  year: number,
+  month: number,
+  transactions: Transaction[],
+  accounts?: BankAccount[],
+): number | null {
   const named =
     item.referenceMerchant ?? transactions.find((transaction) => transaction.id === item.referenceTransactionId)?.merchant ?? "";
   const merchant = placeKey(named);
   if (!merchant) return null;
+  const account = accounts ? accountOfRecurring(item, accounts) : null;
   const matches = transactions.filter(
     (transaction) =>
       transaction.direction === "expense" &&
       !transaction.excluded &&
       inMonth(transaction.occurredAt, year, month) &&
-      placeKey(transaction.merchant) === merchant,
+      placeKey(transaction.merchant) === merchant &&
+      (!account || sameAccountTail(transaction, account)),
   );
   return latestOf(matches)?.amount ?? null;
+}
+
+function accountOfRecurring(item: Recurring, accounts: BankAccount[]): BankAccount | null {
+  const main = accounts.find((account) => account.isMain) ?? accounts[0];
+  const id = item.accountId && accounts.some((account) => account.id === item.accountId) ? item.accountId : main?.id;
+  return accounts.find((account) => account.id === id) ?? null;
 }

@@ -25,6 +25,7 @@ export function CardsPage() {
     cards: ledger.snap.cards,
     cardMarks: ledger.snap.cardMarks,
     transactions: ledger.snap.transactions,
+    accounts: ledger.snap.accounts,
   });
   const [name, setName] = useState("");
   const [paymentAccountId, setPaymentAccountId] = useState(mainAccount(ledger.snap).id);

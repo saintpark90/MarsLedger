@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { useLedger, type NewTransaction } from "../context/LedgerContext";
-import { accountLabel, mainAccount, resolveAccount, transactionBank } from "../lib/accounts";
+import { accountForBalance, accountLabel, resolveAccount, transactionBank } from "../lib/accounts";
 import { parseNotification } from "../lib/parseNotification";
 import { clampDay, formatKoreanDate, formatSeoulTime, parseAmountInput, seoulDateKey, seoulParts, shiftYmd, won, ymdKey } from "../lib/format";
 import { planInstallment } from "../lib/installment";
@@ -105,8 +105,7 @@ export function TransactionsPage() {
         autoCategorized: true,
         createdAt: new Date().toISOString(),
       };
-      const matched = resolveAccount(draft, ledger.snap.accounts);
-      const target = matched ?? (transactionBank(draft) ? null : mainAccount(ledger.snap));
+      const target = accountForBalance(draft, ledger.snap.accounts);
       if (!target) return;
       const apply = window.confirm(`알림의 잔액 ${won(parsed.balanceAfter)}으로 ${target.name}을 맞출까요?`);
       if (apply) {

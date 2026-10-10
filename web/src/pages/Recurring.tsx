@@ -24,6 +24,7 @@ export function RecurringPage() {
     cards: [],
     cardMarks: [],
     transactions: ledger.snap.transactions,
+    accounts: ledger.snap.accounts,
   });
   const pending = new Set(forecast.recurringPending.map((item) => item.id));
   const [name, setName] = useState("");
@@ -148,7 +149,7 @@ function RecurringItem({ item, pending }: { item: Recurring; pending: boolean })
   const main = mainAccount(ledger.snap);
   const account = ledger.snap.accounts.find((entry) => entry.id === item.accountId) ?? main;
   const category = ledger.snap.categories.find((entry) => entry.id === item.categoryId);
-  const priced = recurringAmount(item, today.year, today.month, ledger.snap.recurringMarks, ledger.snap.transactions);
+  const priced = recurringAmount(item, today.year, today.month, ledger.snap.recurringMarks, ledger.snap.transactions, ledger.snap.accounts);
   const monthMark = ledger.snap.recurringMarks.find((mark) => mark.recurringId === item.id && mark.year === today.year && mark.month === today.month);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(item.name);

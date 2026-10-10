@@ -39,7 +39,7 @@ export function SettingsPage() {
         <div>
           <h3 className="font-semibold">통장</h3>
           <p className="mt-1 text-sm text-muted">
-            알림을 보낸 앱 이름(카카오뱅크)으로 은행을 구분하고, 알림의 통장 뒤 4자리가 있으면 같은 은행의 통장도 나눕니다. 급여와 상여는 항목마다 입금 통장을 정하고, 자동이체는 항목마다 출금 통장을 정합니다.
+            알림을 보낸 앱 이름(카카오뱅크)으로 은행을 구분하고, 알림에 적힌 통장 뒤 4자리가 등록한 통장과 같을 때만 그 통장으로 반영합니다. 급여와 상여는 항목마다 입금 통장을 정하고, 자동이체는 항목마다 출금 통장을 정합니다.
           </p>
         </div>
         {signals.length > 0 && (
@@ -335,6 +335,7 @@ function SalaryRow({ salary, peers, payday }: { salary: Salary; peers: Salary[];
     { ...salary, company, title },
     peers.map((item) => (item.id === salary.id ? { ...item, company, title } : item)),
     ledger.snap.transactions,
+    ledger.snap.accounts,
   );
 
   return (

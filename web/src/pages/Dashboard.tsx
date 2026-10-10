@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { useLedger } from "../context/LedgerContext";
-import { cardsPaidFrom, mainAccount, recurringForAccount, resolveAccount, transactionBank } from "../lib/accounts";
+import { accountForBalance, cardsPaidFrom, mainAccount, recurringForAccount } from "../lib/accounts";
 import { categoryBreakdown } from "../lib/analytics";
 import { buildForecast, type Forecast } from "../lib/forecast";
 import { formatKoreanDateTime, formatKoreanYmd, monthLabel, recurringDayText, seoulParts, won } from "../lib/format";
@@ -229,11 +229,7 @@ function latestBalanceHint(snap: LedgerSnapshot) {
   const main = mainAccount(snap);
   const found = [...snap.transactions]
     .filter((transaction) => transaction.balanceAfter != null)
-    .filter((transaction) => {
-      const account = resolveAccount(transaction, snap.accounts);
-      if (account) return account.id === main.id;
-      return !transactionBank(transaction);
-    })
+    .filter((transaction) => accountForBalance(transaction, snap.accounts)?.id === main.id)
     .sort((a, b) => +new Date(b.occurredAt) - +new Date(a.occurredAt))[0];
   if (!found || found.balanceAfter == null) return null;
   const newer = !main.balanceAsOf || +new Date(found.occurredAt) > +new Date(main.balanceAsOf);
