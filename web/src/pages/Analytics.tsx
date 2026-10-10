@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { compareColumn, SortHeader, useColumnSort } from "../components/ColumnSort";
 import { Button, SelectInput } from "../components/Ui";
 import { useLedger } from "../context/LedgerContext";
 import { categoryBreakdown, incomeOf, monthlyTrend, monthOptions, spendingOf, topMerchants } from "../lib/analytics";
@@ -172,11 +173,17 @@ function Stat({ label, value, onClick }: { label: string; value: string; onClick
 
 function PatternSheet({ detail, onClose }: { detail: Detail; onClose: () => void }) {
   const ledger = useLedger();
-  const rows = ledger.snap.transactions
-    .filter((transaction) => matches(transaction, detail))
-    .sort((a, b) => +new Date(b.occurredAt) - +new Date(a.occurredAt));
+  const rows = ledger.snap.transactions.filter((transaction) => matches(transaction, detail));
   const showInstallment = rows.some((row) => installmentOf(row));
   const total = rows.reduce((sum, row) => sum + signed(row, detail), 0);
+  const sort = useColumnSort<UsageColumn>("date", "desc");
+  const sorted = useMemo(() => {
+    const categories = ledger.snap.categories;
+    const accounts = ledger.snap.accounts;
+    return [...rows].sort((left, right) =>
+      compareColumn(patternValue(left, sort.key, detail, categories, accounts), patternValue(right, sort.key, detail, categories, accounts), sort.direction),
+    );
+  }, [detail, ledger.snap.accounts, ledger.snap.categories, rows, sort.direction, sort.key]);
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -221,16 +228,18 @@ function PatternSheet({ detail, onClose }: { detail: Detail; onClose: () => void
             <table className="w-full min-w-[720px] border-collapse text-sm">
               <thead className="sticky top-0 bg-[#f2f2f2] text-left">
                 <tr>
-                  <th className="border border-line px-2 py-1.5 font-medium">날짜</th>
-                  <th className="border border-line px-2 py-1.5 font-medium">사용처</th>
-                  <th className="border border-line px-2 py-1.5 font-medium">구분</th>
-                  <th className="border border-line px-2 py-1.5 font-medium">카테고리</th>
-                  {showInstallment && <th className="border border-line px-2 py-1.5 font-medium">할부</th>}
-                  <th className="border border-line px-2 py-1.5 text-right font-medium">금액</th>
+                  <SortHeader label="날짜" active={sort.key === "date"} direction={sort.direction} onClick={() => sort.toggle("date")} />
+                  <SortHeader label="사용처" active={sort.key === "merchant"} direction={sort.direction} onClick={() => sort.toggle("merchant")} />
+                  <SortHeader label="구분" active={sort.key === "direction"} direction={sort.direction} onClick={() => sort.toggle("direction")} />
+                  <SortHeader label="카테고리" active={sort.key === "category"} direction={sort.direction} onClick={() => sort.toggle("category")} />
+                  {showInstallment && (
+                    <SortHeader label="할부" active={sort.key === "installment"} direction={sort.direction} onClick={() => sort.toggle("installment")} />
+                  )}
+                  <SortHeader label="금액" align="right" active={sort.key === "amount"} direction={sort.direction} onClick={() => sort.toggle("amount")} />
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row) => {
+                {sorted.map((row) => {
                   const amount = signed(row, detail);
                   const category = ledger.snap.categories.find((item) => item.id === row.categoryId);
                   return (
@@ -264,6 +273,23 @@ function PatternSheet({ detail, onClose }: { detail: Detail; onClose: () => void
       </section>
     </div>
   );
+}
+
+type UsageColumn = "date" | "merchant" | "direction" | "category" | "installment" | "amount";
+
+function patternValue(
+  row: Transaction,
+  key: UsageColumn,
+  detail: Detail,
+  categories: { id: string; name: string }[],
+  accounts: { id: string; name: string }[],
+): string | number {
+  if (key === "date") return +new Date(row.occurredAt);
+  if (key === "merchant") return merchantLabel(row.merchant, accounts.find((item) => item.id === row.accountId)?.name);
+  if (key === "direction") return directionLabel(row);
+  if (key === "category") return categories.find((item) => item.id === row.categoryId)?.name ?? "미분류";
+  if (key === "installment") return installmentOf(row);
+  return signed(row, detail);
 }
 
 function matches(transaction: Transaction, detail: Detail): boolean {

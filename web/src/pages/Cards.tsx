@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLedger } from "../context/LedgerContext";
+import { compareColumn, SortHeader, useColumnSort } from "../components/ColumnSort";
 import { SortableList } from "../components/Sortable";
 import { AccountField, AccountThumb, CardThumb } from "../components/Thumbs";
 import { bySort } from "../lib/order";
@@ -319,6 +320,14 @@ function UsageSheet({
   const rows = usageRows(card, ledger.snap.transactions, start, end);
   const showInstallment = rows.some((row) => installmentOf(row));
   const total = rows.reduce((sum, row) => sum + signedAmount(row), 0);
+  const sort = useColumnSort<UsageColumn>("date", "asc");
+  const sorted = useMemo(() => {
+    const categories = ledger.snap.categories;
+    const accounts = ledger.snap.accounts;
+    return [...rows].sort((left, right) =>
+      compareColumn(usageValue(left, sort.key, categories, accounts), usageValue(right, sort.key, categories, accounts), sort.direction),
+    );
+  }, [ledger.snap.accounts, ledger.snap.categories, rows, sort.direction, sort.key]);
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -363,16 +372,18 @@ function UsageSheet({
             <table className="w-full min-w-[720px] border-collapse text-sm">
               <thead className="sticky top-0 bg-[#f2f2f2] text-left">
                 <tr>
-                  <th className="border border-line px-2 py-1.5 font-medium">날짜</th>
-                  <th className="border border-line px-2 py-1.5 font-medium">사용처</th>
-                  <th className="border border-line px-2 py-1.5 font-medium">구분</th>
-                  <th className="border border-line px-2 py-1.5 font-medium">카테고리</th>
-                  {showInstallment && <th className="border border-line px-2 py-1.5 font-medium">할부</th>}
-                  <th className="border border-line px-2 py-1.5 text-right font-medium">금액</th>
+                  <SortHeader label="날짜" active={sort.key === "date"} direction={sort.direction} onClick={() => sort.toggle("date")} />
+                  <SortHeader label="사용처" active={sort.key === "merchant"} direction={sort.direction} onClick={() => sort.toggle("merchant")} />
+                  <SortHeader label="구분" active={sort.key === "direction"} direction={sort.direction} onClick={() => sort.toggle("direction")} />
+                  <SortHeader label="카테고리" active={sort.key === "category"} direction={sort.direction} onClick={() => sort.toggle("category")} />
+                  {showInstallment && (
+                    <SortHeader label="할부" active={sort.key === "installment"} direction={sort.direction} onClick={() => sort.toggle("installment")} />
+                  )}
+                  <SortHeader label="금액" align="right" active={sort.key === "amount"} direction={sort.direction} onClick={() => sort.toggle("amount")} />
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row) => {
+                {sorted.map((row) => {
                   const amount = signedAmount(row);
                   const category = ledger.snap.categories.find((item) => item.id === row.categoryId);
                   return (
@@ -404,6 +415,22 @@ function UsageSheet({
       </section>
     </div>
   );
+}
+
+type UsageColumn = "date" | "merchant" | "direction" | "category" | "installment" | "amount";
+
+function usageValue(
+  row: Transaction,
+  key: UsageColumn,
+  categories: { id: string; name: string }[],
+  accounts: { id: string; name: string }[],
+): string | number {
+  if (key === "date") return +new Date(row.occurredAt);
+  if (key === "merchant") return merchantLabel(row.merchant, accounts.find((item) => item.id === row.accountId)?.name);
+  if (key === "direction") return row.direction === "refund" ? "취소" : "지출";
+  if (key === "category") return categories.find((item) => item.id === row.categoryId)?.name ?? "미분류";
+  if (key === "installment") return installmentOf(row);
+  return signedAmount(row);
 }
 
 function signedAmount(row: Transaction): number {
