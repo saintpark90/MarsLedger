@@ -353,6 +353,32 @@ describe("buildForecast", () => {
     expect(forecast.salaryAmount).toBe(2_600_000);
   });
 
+  it("adds salary to the chosen account and keeps an unset salary on the main account", () => {
+    const main = bank("main", "카카오뱅크", "8547", true);
+    const kookmin = bank("kb", "국민은행", "1234", false);
+    const salaries = [
+      { id: "pay", year: 2026, month: 9, day: 25, amount: 2_000_000, received: true, company: "아세아제지", title: "급여", accountId: "kb" },
+      { id: "bonus", year: 2026, month: 9, day: 31, amount: 500_000, received: true, company: "아세아제지", title: "상여", accountId: null },
+    ];
+    const shared = {
+      today: { year: 2026, month: 10, day: 10 },
+      payday: 25,
+      salaries,
+      recurring: [],
+      recurringMarks: [],
+      cards: [],
+      cardMarks: [],
+      transactions: [],
+      accounts: [main, kookmin],
+    };
+    const onKookmin = buildForecast({ ...shared, balance: 100_000, salaryAccountId: "kb" });
+    const onMain = buildForecast({ ...shared, balance: 1_000_000, salaryAccountId: "main" });
+    expect(onKookmin.salaryLines.map((line) => line.title)).toEqual(["급여"]);
+    expect(onKookmin.expectedBalance).toBe(2_100_000);
+    expect(onMain.salaryLines.map((line) => line.title)).toEqual(["상여"]);
+    expect(onMain.expectedBalance).toBe(1_500_000);
+  });
+
   it("matches a deposit to the named pay item, not the other one from the same company", () => {
     const salaries = [
       { id: "pay", year: 2026, month: 9, day: 25, amount: 2_000_000, received: true, company: "아세아제지", title: "급여" },

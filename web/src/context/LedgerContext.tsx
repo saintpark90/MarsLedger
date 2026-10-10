@@ -90,7 +90,7 @@ type LedgerController = {
   addAccount: (input: { name: string; bankName: string; last4: string; balance: number; isMain?: boolean }) => Promise<boolean>;
   updateAccount: (id: string, patch: Partial<BankAccount>) => Promise<boolean>;
   deleteAccount: (id: string) => Promise<boolean>;
-  saveSalary: (year: number, month: number, amount: number, received: boolean, day?: number, company?: string, title?: string) => Promise<boolean>;
+  saveSalary: (year: number, month: number, amount: number, received: boolean, day?: number, company?: string, title?: string, accountId?: string | null) => Promise<boolean>;
   clearSalary: (year: number, month: number, day?: number) => Promise<boolean>;
   addTransaction: (input: NewTransaction) => Promise<boolean>;
   importTransactions: (inputs: NewTransaction[], notice?: string) => Promise<boolean>;
@@ -320,10 +320,11 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
           accounts = accounts.map((account, index) => ({ ...account, isMain: index === 0 }));
         }
         const cards = snap.cards.map((card) => (card.paymentAccountId === id ? { ...card, paymentAccountId: null } : card));
+        const salaries = snap.salaries.map((salary) => (salary.accountId === id ? { ...salary, accountId: null } : salary));
         const transactions = snap.transactions.map((transaction) =>
           transaction.accountId === id ? { ...transaction, accountId: null } : transaction,
         );
-        const next = mirrorMainBalance({ ...snap, accounts, cards, transactions });
+        const next = mirrorMainBalance({ ...snap, accounts, cards, transactions, salaries });
         return commit(next, async () => {
           await deleteAccount(id);
           const promoted = next.accounts.find((account) => account.isMain);
@@ -331,11 +332,22 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
           await saveSettings(next.settings);
         });
       },
-      saveSalary: (year, month, amount, received, day = snap.settings.payday, company = "", title = "") => {
+      saveSalary: (year, month, amount, received, day = snap.settings.payday, company = "", title = "", accountId = null) => {
         const existing = snap.salaries.find(
           (salary) => salary.year === year && salary.month === month && (salary.day ?? snap.settings.payday) === day,
         );
-        const salary = { id: existing?.id ?? createId(), year, month, day, amount, received, company: company.trim(), title: title.trim() };
+        const chosen = accountId && snap.accounts.some((account) => account.id === accountId) ? accountId : null;
+        const salary = {
+          id: existing?.id ?? createId(),
+          year,
+          month,
+          day,
+          amount,
+          received,
+          company: company.trim(),
+          title: title.trim(),
+          accountId: chosen,
+        };
         const salaries = existing
           ? snap.salaries.map((item) => (item.id === existing.id ? salary : item))
           : [...snap.salaries, salary];

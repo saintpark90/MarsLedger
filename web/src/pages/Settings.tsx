@@ -2,12 +2,12 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useLedger } from "../context/LedgerContext";
 import { accountLabel, mainAccount, unseenSignals } from "../lib/accounts";
+import { AccountField, AccountThumb } from "../components/Thumbs";
+import { Button, Field, SelectInput, TextInput } from "../components/Ui";
 import { readConnection } from "../lib/connection";
 import { monthLabel, parseAmountInput, previousMonth, seoulParts, won } from "../lib/format";
 import { latestSalaryDeposit } from "../lib/forecast";
 import { useInstallPrompt } from "../components/useInstall";
-import { AccountThumb } from "../components/Thumbs";
-import { Button, Field, TextInput } from "../components/Ui";
 import type { BankAccount, Salary } from "../lib/types";
 
 export function SettingsPage() {
@@ -39,7 +39,7 @@ export function SettingsPage() {
         <div>
           <h3 className="font-semibold">통장</h3>
           <p className="mt-1 text-sm text-muted">
-            알림을 보낸 앱 이름(카카오뱅크)으로 은행을 구분하고, 알림의 통장 뒤 4자리가 있으면 같은 은행의 통장도 나눕니다. 예상 잔액과 급여는 메인 통장 기준이고, 자동이체는 항목마다 출금 통장을 정합니다.
+            알림을 보낸 앱 이름(카카오뱅크)으로 은행을 구분하고, 알림의 통장 뒤 4자리가 있으면 같은 은행의 통장도 나눕니다. 급여와 상여는 항목마다 입금 통장을 정하고, 자동이체는 항목마다 출금 통장을 정합니다.
           </p>
         </div>
         {signals.length > 0 && (
@@ -156,7 +156,7 @@ export function SettingsPage() {
         <div>
           <h3 className="font-semibold">급여</h3>
           <p className="mt-1 text-sm text-muted">
-            이름에 급여, 상여를 구분해 둡니다. 입금명에 그 이름이 있고 회사명으로 끝나면 그 항목으로 봅니다. 한 번이라도 들어오면 그 금액으로 계산하고, 날짜는 참고만 합니다.
+            이름에 급여, 상여를 구분해 두고, 돈이 들어오는 통장을 고릅니다. 입금명에 그 이름이 있고 회사명으로 끝나면 그 항목으로 봅니다. 한 번이라도 들어오면 그 금액으로 계산하고, 날짜는 참고만 합니다.
           </p>
         </div>
         <SalaryMonth year={today.year} month={today.month} salaries={currentSalaries} payday={ledger.snap.settings.payday} />
@@ -167,7 +167,7 @@ export function SettingsPage() {
         <h3 className="font-semibold">계산 기준</h3>
         <p>각 통장 잔액에서, 그 통장으로 지정한 자동이체 가운데 오늘 포함 아직 지나지 않은 항목을 뺍니다. 통장이 비어 있는 기존 자동이체는 메인 통장에서 나갑니다. 이체일 31일은 그 달의 말일입니다.</p>
         <p>카드 청구액은 카드에 정한 이용기간의 사용 합계입니다. 이번 달 출금이 아직 지나기 전이면 그 청구액을 빼고, 지금 쌓인 이용금액도 출금일이 다음 달이어도 이번 달 남는 돈에서 뺍니다. 직접 입력한 금액이 있으면 그 값을 씁니다.</p>
-        <p>이번 달에 같은 날 항목이 없으면 지난달 급여와 상여를 이어서 메인에 보여 줍니다. 입금명에 항목 이름이 있고 회사명으로 끝나면 그 항목이 들어온 것으로 보고, 가장 최근 입금 금액을 다음 예상에도 씁니다. 날짜는 그때쯤 들어온다는 참고입니다.</p>
+        <p>이번 달에 같은 날 항목이 없으면 지난달 급여와 상여를 이어서, 각 항목에 정한 입금 통장에 보여 줍니다. 통장을 비워 둔 기존 항목은 메인 통장에 들어옵니다. 입금명에 항목 이름이 있고 회사명으로 끝나면 그 항목이 들어온 것으로 보고, 가장 최근 입금 금액을 다음 예상에도 씁니다. 날짜는 그때쯤 들어온다는 참고입니다.</p>
         <p>
           카드와 분류 규칙은 <Link className="text-pine" to="/cards">카드</Link>, <Link className="text-pine" to="/rules">분류</Link>에서 수정합니다.
         </p>
@@ -260,6 +260,9 @@ function SalaryMonth({
   const [amount, setAmount] = useState("");
   const [company, setCompany] = useState("");
   const [title, setTitle] = useState("급여");
+  const main = mainAccount(ledger.snap);
+  const [accountId, setAccountId] = useState(main.id);
+  const selectedAccountId = ledger.snap.accounts.some((account) => account.id === accountId) ? accountId : main.id;
   const rows = [...salaries].sort((left, right) => (left.day ?? payday) - (right.day ?? payday));
 
   return (
@@ -279,6 +282,17 @@ function SalaryMonth({
               <TextInput value={company} onChange={(event) => setCompany(event.target.value)} placeholder="아세아제지" />
             </Field>
           </div>
+          <Field label="입금 통장">
+            <AccountField accounts={ledger.snap.accounts} accountId={selectedAccountId}>
+              <SelectInput value={selectedAccountId} onChange={(event) => setAccountId(event.target.value)}>
+                {ledger.snap.accounts.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {accountLabel(account)}
+                  </option>
+                ))}
+              </SelectInput>
+            </AccountField>
+          </Field>
           <div className="grid gap-2 md:grid-cols-[100px_1fr_auto] md:items-end">
             <Field label="날짜">
               <TextInput inputMode="numeric" value={day} onChange={(event) => setDay(event.target.value)} />
@@ -292,7 +306,7 @@ function SalaryMonth({
                 const payDay = Number(day);
                 const value = parseAmountInput(amount);
                 if (payDay < 1 || payDay > 31 || value <= 0) return;
-                void ledger.saveSalary(year, month, value, false, payDay, company, title);
+                void ledger.saveSalary(year, month, value, false, payDay, company, title, selectedAccountId);
                 setAmount("");
                 setCompany("");
                 setTitle("급여");
@@ -314,6 +328,9 @@ function SalaryRow({ salary, peers, payday }: { salary: Salary; peers: Salary[];
   const [company, setCompany] = useState(salary.company ?? "");
   const [title, setTitle] = useState(salary.title ?? "");
   const [received, setReceived] = useState(salary.received);
+  const main = mainAccount(ledger.snap);
+  const initialAccount = salary.accountId && ledger.snap.accounts.some((account) => account.id === salary.accountId) ? salary.accountId : main.id;
+  const [accountId, setAccountId] = useState(initialAccount);
   const deposit = latestSalaryDeposit(
     { ...salary, company, title },
     peers.map((item) => (item.id === salary.id ? { ...item, company, title } : item)),
@@ -330,6 +347,17 @@ function SalaryRow({ salary, peers, payday }: { salary: Salary; peers: Salary[];
           <TextInput value={company} onChange={(event) => setCompany(event.target.value)} placeholder="아세아제지" />
         </Field>
       </div>
+      <Field label="입금 통장">
+        <AccountField accounts={ledger.snap.accounts} accountId={accountId}>
+          <SelectInput value={accountId} onChange={(event) => setAccountId(event.target.value)}>
+            {ledger.snap.accounts.map((account) => (
+              <option key={account.id} value={account.id}>
+                {accountLabel(account)}
+              </option>
+            ))}
+          </SelectInput>
+        </AccountField>
+      </Field>
       <div className="grid gap-2 md:grid-cols-[1fr_auto] md:items-end">
         <Field label="예상 금액">
           <TextInput inputMode="numeric" value={amount} onChange={(event) => setAmount(event.target.value)} />
@@ -347,7 +375,7 @@ function SalaryRow({ salary, peers, payday }: { salary: Salary; peers: Salary[];
           onClick={() => {
             const value = parseAmountInput(amount);
             if (value <= 0) return;
-            void ledger.saveSalary(salary.year, salary.month, value, received, day, company, title);
+            void ledger.saveSalary(salary.year, salary.month, value, received, day, company, title, accountId);
           }}
         >
           저장

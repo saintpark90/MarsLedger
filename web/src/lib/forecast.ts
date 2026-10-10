@@ -1,7 +1,7 @@
 import { compareYmd, cycleForDate, cyclePayingIn, usageBetween } from "./cardCycle";
 import { clampDay, inMonth, previousMonth } from "./format";
 import { shortMerchant } from "./parseNotification";
-import type { CardMark, CreditCard, Recurring, RecurringMark, Salary, Transaction, YMD } from "./types";
+import type { BankAccount, CardMark, CreditCard, Recurring, RecurringMark, Salary, Transaction, YMD } from "./types";
 
 export type ForecastSalary = {
   id: string;
@@ -62,9 +62,12 @@ export function buildForecast(input: {
   cards: CreditCard[];
   cardMarks: CardMark[];
   transactions: Transaction[];
+  salaryAccountId?: string;
+  accounts?: BankAccount[];
 }): Forecast {
   const { today, balance, salaries, recurring, recurringMarks, cards, cardMarks, transactions } = input;
-  const salaryLines = salariesForMonth(salaries, today, input.payday, transactions);
+  const salaryScope = input.salaryAccountId && input.accounts ? { accountId: input.salaryAccountId, accounts: input.accounts } : undefined;
+  const salaryLines = salariesForMonth(salaries, today, input.payday, transactions, salaryScope);
   const salaryUsedPreviousMonth = salaryLines.some((line) => line.usedPreviousMonth);
   const salaryAmount = salaryLines.filter((line) => line.pending).reduce((sum, line) => sum + line.amount, 0);
   const salaryKnown = salaryLines.length > 0;
@@ -169,14 +172,26 @@ function stillDue(item: Recurring, today: YMD, marks: RecurringMark[]): boolean 
   return today.day <= clampDay(today.year, today.month, item.dayOfMonth);
 }
 
-function salariesForMonth(salaries: Salary[], today: YMD, payday: number, transactions: Transaction[]): ForecastSalary[] {
+function salariesForMonth(
+  salaries: Salary[],
+  today: YMD,
+  payday: number,
+  transactions: Transaction[],
+  scope?: { accountId: string; accounts: BankAccount[] },
+): ForecastSalary[] {
   const current = salaries.filter((salary) => salary.year === today.year && salary.month === today.month);
   const prev = previousMonth(today.year, today.month);
   const previous = salaries.filter((salary) => salary.year === prev.year && salary.month === prev.month);
   const chosen = new Map<number, { salary: Salary; fromPrevious: boolean }>();
   for (const salary of previous) chosen.set(paydayOf(salary, payday), { salary, fromPrevious: true });
-  for (const salary of current) chosen.set(paydayOf(salary, payday), { salary, fromPrevious: false });
-  const source = [...chosen.values()].sort((left, right) => paydayOf(left.salary, payday) - paydayOf(right.salary, payday));
+  for (const salary of current) {
+    const day = paydayOf(salary, payday);
+    const inherited = salary.accountId || chosen.get(day)?.salary.accountId || null;
+    chosen.set(day, { salary: { ...salary, accountId: inherited }, fromPrevious: false });
+  }
+  const source = [...chosen.values()]
+    .filter((entry) => !scope || salaryAccount(entry.salary, scope.accounts) === scope.accountId)
+    .sort((left, right) => paydayOf(left.salary, payday) - paydayOf(right.salary, payday));
   const deposits = depositsBySalary(source.map((entry) => entry.salary), transactions);
   return source.map(({ salary, fromPrevious }) => {
     const day = clampDay(today.year, today.month, paydayOf(salary, payday));
@@ -198,6 +213,12 @@ function salariesForMonth(salaries: Salary[], today: YMD, payday: number, transa
 
 function paydayOf(salary: Salary, payday: number): number {
   return salary.day && salary.day >= 1 ? salary.day : payday;
+}
+
+function salaryAccount(salary: Salary, accounts: BankAccount[]): string | null {
+  const main = accounts.find((account) => account.isMain) ?? accounts[0];
+  if (salary.accountId && accounts.some((account) => account.id === salary.accountId)) return salary.accountId;
+  return main?.id ?? null;
 }
 
 export function latestSalaryDeposit(salary: Salary, peers: Salary[], transactions: Transaction[]): Transaction | null {
@@ -232,8 +253,9 @@ function depositScore(salary: Salary | null, merchant: string): number {
   const text = compact(merchant);
   if (!company || !text.endsWith(company)) return 0;
   const name = compact(salary.title ?? "");
-  if (name && text.includes(name)) return 1000 + company.length + name.length;
-  return company.length;
+  if (!name) return company.length;
+  if (!text.includes(name)) return 0;
+  return 1000 + company.length + name.length;
 }
 
 function placeKey(value: string): string {
